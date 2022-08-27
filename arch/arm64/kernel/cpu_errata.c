@@ -350,6 +350,11 @@ static const struct midr_range erratum_speculative_at_list[] = {
 	MIDR_RANGE(MIDR_CORTEX_A55, 0, 0, 2, 0),
 	/* Kryo4xx Silver (rdpe => r1p0) */
 	MIDR_REV(MIDR_QCOM_KRYO_4XX_SILVER, 0xd, 0xe),
+	/* Kryo5xx Silver r0p0 to r2p0 */
+	MIDR_RANGE(MIDR_QCOM_KRYO_5XX_SILVER, 0x0, 0x0, 0x2, 0x0),
+	/* Kryo6xx Silver r2p0 */
+	MIDR_REV(MIDR_QCOM_KRYO_6XX_SILVER, 0x2, 0x0),
+	
 #endif
 	{},
 };
@@ -599,9 +604,11 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 		/* we depend on the firmware portion for correctness */
 		.desc = "ARM erratum 1508412 (kernel portion)",
 		.capability = ARM64_WORKAROUND_1508412,
-		ERRATA_MIDR_RANGE(MIDR_CORTEX_A77,
+		ERRATA_MIDR_RANGE(MIDR_CORTEX_A77 ,
 				  0, 0,
 				  1, 0),
+		ERRATA_MIDR_ALL_VERSIONS(MIDR_QCOM_KRYO_5XX_PRIME),
+		ERRATA_MIDR_ALL_VERSIONS(MIDR_QCOM_KRYO_5XX_GOLD),
 	},
 #endif
 #ifdef CONFIG_NVIDIA_CARMEL_CNP_ERRATUM
