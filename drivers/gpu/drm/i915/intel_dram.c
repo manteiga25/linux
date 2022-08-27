@@ -3,9 +3,13 @@
  * Copyright © 2020 Intel Corporation
  */
 
+#include <linux/string_helpers.h>
+
 #include "i915_drv.h"
+#include "i915_reg.h"
 #include "intel_dram.h"
-#include "intel_sideband.h"
+#include "intel_mchbar_regs.h"
+#include "intel_pcode.h"
 
 struct dram_dimm_info {
 	u16 size;
@@ -134,7 +138,7 @@ skl_dram_get_dimm_info(struct drm_i915_private *i915,
 	drm_dbg_kms(&i915->drm,
 		    "CH%u DIMM %c size: %u Gb, width: X%u, ranks: %u, 16Gb DIMMs: %s\n",
 		    channel, dimm_name, dimm->size, dimm->width, dimm->ranks,
-		    yesno(skl_is_16gb_dimm(dimm)));
+		    str_yes_no(skl_is_16gb_dimm(dimm)));
 }
 
 static int
@@ -163,7 +167,7 @@ skl_dram_get_channel_info(struct drm_i915_private *i915,
 		skl_is_16gb_dimm(&ch->dimm_s);
 
 	drm_dbg_kms(&i915->drm, "CH%u ranks: %u, 16Gb DIMMs: %s\n",
-		    channel, ch->ranks, yesno(ch->is_16gb_dimm));
+		    channel, ch->ranks, str_yes_no(ch->is_16gb_dimm));
 
 	return 0;
 }
@@ -212,7 +216,7 @@ skl_dram_get_channels_info(struct drm_i915_private *i915)
 	dram_info->symmetric_memory = intel_is_dram_symmetric(&ch0, &ch1);
 
 	drm_dbg_kms(&i915->drm, "Memory configuration is symmetric? %s\n",
-		    yesno(dram_info->symmetric_memory));
+		    str_yes_no(dram_info->symmetric_memory));
 
 	return 0;
 }
@@ -244,7 +248,6 @@ static int
 skl_get_dram_info(struct drm_i915_private *i915)
 {
 	struct dram_info *dram_info = &i915->dram_info;
-	u32 mem_freq_khz, val;
 	int ret;
 
 	dram_info->type = skl_get_dram_type(i915);
@@ -254,17 +257,6 @@ skl_get_dram_info(struct drm_i915_private *i915)
 	ret = skl_dram_get_channels_info(i915);
 	if (ret)
 		return ret;
-
-	val = intel_uncore_read(&i915->uncore,
-				SKL_MC_BIOS_DATA_0_0_0_MCHBAR_PCU);
-	mem_freq_khz = DIV_ROUND_UP((val & SKL_REQ_DATA_MASK) *
-				    SKL_MEMORY_FREQ_MULTIPLIER_HZ, 1000);
-
-	if (dram_info->num_channels * mem_freq_khz == 0) {
-		drm_info(&i915->drm,
-			 "Couldn't get system memory bandwidth\n");
-		return -EINVAL;
-	}
 
 	return 0;
 }
@@ -350,23 +342,9 @@ static void bxt_get_dimm_info(struct dram_dimm_info *dimm, u32 val)
 static int bxt_get_dram_info(struct drm_i915_private *i915)
 {
 	struct dram_info *dram_info = &i915->dram_info;
-	u32 dram_channels;
-	u32 mem_freq_khz, val;
-	u8 num_active_channels, valid_ranks = 0;
+	u32 val;
+	u8 valid_ranks = 0;
 	int i;
-
-	val = intel_uncore_read(&i915->uncore, BXT_P_CR_MC_BIOS_REQ_0_0_0);
-	mem_freq_khz = DIV_ROUND_UP((val & BXT_REQ_DATA_MASK) *
-				    BXT_MEMORY_FREQ_MULTIPLIER_HZ, 1000);
-
-	dram_channels = val & BXT_DRAM_CHANNEL_ACTIVE_MASK;
-	num_active_channels = hweight32(dram_channels);
-
-	if (mem_freq_khz * num_active_channels == 0) {
-		drm_info(&i915->drm,
-			 "Couldn't get system memory bandwidth\n");
-		return -EINVAL;
-	}
 
 	/*
 	 * Now read each DUNIT8/9/10/11 to check the rank of each dimms.
@@ -415,10 +393,8 @@ static int icl_pcode_read_mem_global_info(struct drm_i915_private *dev_priv)
 	u32 val = 0;
 	int ret;
 
-	ret = sandybridge_pcode_read(dev_priv,
-				     ICL_PCODE_MEM_SUBSYSYSTEM_INFO |
-				     ICL_PCODE_MEM_SS_READ_GLOBAL_INFO,
-				     &val, NULL);
+	ret = snb_pcode_read(&dev_priv->uncore, ICL_PCODE_MEM_SUBSYSYSTEM_INFO |
+			     ICL_PCODE_MEM_SS_READ_GLOBAL_INFO, &val, NULL);
 	if (ret)
 		return ret;
 
@@ -444,7 +420,7 @@ static int icl_pcode_read_mem_global_info(struct drm_i915_private *dev_priv)
 			break;
 		default:
 			MISSING_CASE(val & 0xf);
-			return -1;
+			return -EINVAL;
 		}
 	} else {
 		switch (val & 0xf) {
@@ -462,7 +438,7 @@ static int icl_pcode_read_mem_global_info(struct drm_i915_private *dev_priv)
 			break;
 		default:
 			MISSING_CASE(val & 0xf);
-			return -1;
+			return -EINVAL;
 		}
 	}
 
@@ -518,7 +494,7 @@ void intel_dram_detect(struct drm_i915_private *i915)
 	drm_dbg_kms(&i915->drm, "DRAM channels: %u\n", dram_info->num_channels);
 
 	drm_dbg_kms(&i915->drm, "Watermark level 0 adjustment needed: %s\n",
-		    yesno(dram_info->wm_lv_0_adjust_needed));
+		    str_yes_no(dram_info->wm_lv_0_adjust_needed));
 }
 
 static u32 gen9_edram_size_mb(struct drm_i915_private *i915, u32 cap)

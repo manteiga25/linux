@@ -43,7 +43,6 @@
 #define hcd_to_ehci_priv(h) ((struct ehci_platform_priv *)hcd_to_ehci(h)->priv)
 
 #define BCM_USB_FIFO_THRESHOLD	0x00800040
-#define bcm_iproc_insnreg01	hostpc[0]
 
 struct ehci_platform_priv {
 	struct clk *clks[EHCI_MAX_CLKS];
@@ -81,7 +80,7 @@ static int ehci_platform_reset(struct usb_hcd *hcd)
 
 	if (of_device_is_compatible(pdev->dev.of_node, "brcm,xgs-iproc-ehci"))
 		ehci_writel(ehci, BCM_USB_FIFO_THRESHOLD,
-			    &ehci->regs->bcm_iproc_insnreg01);
+			    &ehci->regs->brcm_insnreg[1]);
 
 	return 0;
 }
@@ -297,6 +296,12 @@ static int ehci_platform_probe(struct platform_device *dev)
 					  "has-transaction-translator"))
 			hcd->has_tt = 1;
 
+		if (of_device_is_compatible(dev->dev.of_node,
+					    "aspeed,ast2500-ehci") ||
+		    of_device_is_compatible(dev->dev.of_node,
+					    "aspeed,ast2600-ehci"))
+			ehci->is_aspeed = 1;
+
 		if (soc_device_match(quirk_poll_match))
 			priv->quirk_poll = true;
 
@@ -364,6 +369,8 @@ static int ehci_platform_probe(struct platform_device *dev)
 	}
 	hcd->rsrc_start = res_mem->start;
 	hcd->rsrc_len = resource_size(res_mem);
+
+	hcd->tpl_support = of_usb_host_tpl_support(dev->dev.of_node);
 
 	err = usb_add_hcd(hcd, irq, IRQF_SHARED);
 	if (err)
@@ -513,6 +520,7 @@ static struct platform_driver ehci_platform_driver = {
 		.pm	= pm_ptr(&ehci_platform_pm_ops),
 		.of_match_table = vt8500_ehci_ids,
 		.acpi_match_table = ACPI_PTR(ehci_acpi_match),
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	}
 };
 

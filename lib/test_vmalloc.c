@@ -74,12 +74,13 @@ test_report_one_done(void)
 
 static int random_size_align_alloc_test(void)
 {
-	unsigned long size, align, rnd;
+	unsigned long size, align;
+	unsigned int rnd;
 	void *ptr;
 	int i;
 
 	for (i = 0; i < test_loop_count; i++) {
-		get_random_bytes(&rnd, sizeof(rnd));
+		rnd = prandom_u32();
 
 		/*
 		 * Maximum 1024 pages, if PAGE_SIZE is 4096.
@@ -150,7 +151,7 @@ static int random_size_alloc_test(void)
 	int i;
 
 	for (i = 0; i < test_loop_count; i++) {
-		get_random_bytes(&n, sizeof(i));
+		n = prandom_u32();
 		n = (n % 100) + 1;
 
 		p = vmalloc(n * PAGE_SIZE);
@@ -294,14 +295,14 @@ pcpu_alloc_test(void)
 	for (i = 0; i < 35000; i++) {
 		unsigned int r;
 
-		get_random_bytes(&r, sizeof(i));
+		r = prandom_u32();
 		size = (r % (PAGE_SIZE / 4)) + 1;
 
 		/*
 		 * Maximum PAGE_SIZE
 		 */
-		get_random_bytes(&r, sizeof(i));
-		align = 1 << ((i % 11) + 1);
+		r = prandom_u32();
+		align = 1 << ((r % 11) + 1);
 
 		pcpu[i] = __alloc_percpu(size, align);
 		if (!pcpu[i])
@@ -393,18 +394,16 @@ static struct test_driver {
 static void shuffle_array(int *arr, int n)
 {
 	unsigned int rnd;
-	int i, j, x;
+	int i, j;
 
 	for (i = n - 1; i > 0; i--)  {
-		get_random_bytes(&rnd, sizeof(rnd));
+		rnd = prandom_u32();
 
 		/* Cut the range. */
 		j = rnd % i;
 
 		/* Swap indexes. */
-		x = arr[i];
-		arr[i] = arr[j];
-		arr[j] = x;
+		swap(arr[i], arr[j]);
 	}
 }
 

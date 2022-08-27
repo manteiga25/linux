@@ -2767,6 +2767,7 @@ static int velocity_probe(struct device *dev, int irq,
 	struct velocity_info *vptr;
 	struct mac_regs __iomem *regs;
 	int ret = -ENOMEM;
+	u8 addr[ETH_ALEN];
 
 	/* FIXME: this driver, like almost all other ethernet drivers,
 	 * can support more than MAX_UNITS.
@@ -2820,7 +2821,8 @@ static int velocity_probe(struct device *dev, int irq,
 	mac_wol_reset(regs);
 
 	for (i = 0; i < 6; i++)
-		netdev->dev_addr[i] = readb(&regs->PAR[i]);
+		addr[i] = readb(&regs->PAR[i]);
+	eth_hw_addr_set(netdev, addr);
 
 
 	velocity_get_options(&vptr->options, velocity_nics);
@@ -2844,8 +2846,7 @@ static int velocity_probe(struct device *dev, int irq,
 
 	netdev->netdev_ops = &velocity_netdev_ops;
 	netdev->ethtool_ops = &velocity_ethtool_ops;
-	netif_napi_add(netdev, &vptr->napi, velocity_poll,
-							VELOCITY_NAPI_WEIGHT);
+	netif_napi_add(netdev, &vptr->napi, velocity_poll, NAPI_POLL_WEIGHT);
 
 	netdev->hw_features = NETIF_F_IP_CSUM | NETIF_F_SG |
 			   NETIF_F_HW_VLAN_CTAG_TX;

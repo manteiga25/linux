@@ -52,6 +52,7 @@
 
 #include <linux/usb/hcd.h>
 #include <linux/usb/ch11.h>
+#include <linux/usb/of.h>
 
 #include "core.h"
 #include "hcd.h"
@@ -138,19 +139,15 @@ static void dwc2_gusbcfg_init(struct dwc2_hsotg *hsotg)
 
 	switch (hsotg->hw_params.op_mode) {
 	case GHWCFG2_OP_MODE_HNP_SRP_CAPABLE:
-		if (hsotg->params.otg_cap ==
-				DWC2_CAP_PARAM_HNP_SRP_CAPABLE)
+		if (hsotg->params.otg_caps.hnp_support &&
+		    hsotg->params.otg_caps.srp_support)
 			usbcfg |= GUSBCFG_HNPCAP;
-		if (hsotg->params.otg_cap !=
-				DWC2_CAP_PARAM_NO_HNP_SRP_CAPABLE)
-			usbcfg |= GUSBCFG_SRPCAP;
-		break;
+		fallthrough;
 
 	case GHWCFG2_OP_MODE_SRP_ONLY_CAPABLE:
 	case GHWCFG2_OP_MODE_SRP_CAPABLE_DEVICE:
 	case GHWCFG2_OP_MODE_SRP_CAPABLE_HOST:
-		if (hsotg->params.otg_cap !=
-				DWC2_CAP_PARAM_NO_HNP_SRP_CAPABLE)
+		if (hsotg->params.otg_caps.srp_support)
 			usbcfg |= GUSBCFG_SRPCAP;
 		break;
 
@@ -1003,7 +1000,7 @@ static void dwc2_hc_set_even_odd_frame(struct dwc2_hsotg *hsotg,
 
 		/*
 		 * Try to figure out if we're an even or odd frame. If we set
-		 * even and the current frame number is even the the transfer
+		 * even and the current frame number is even the transfer
 		 * will happen immediately.  Similar if both are odd. If one is
 		 * even and the other is odd then the transfer will happen when
 		 * the frame number ticks.
@@ -4403,11 +4400,12 @@ static int _dwc2_hcd_suspend(struct usb_hcd *hcd)
 		 * If not hibernation nor partial power down are supported,
 		 * clock gating is used to save power.
 		 */
-		if (!hsotg->params.no_clock_gating)
+		if (!hsotg->params.no_clock_gating) {
 			dwc2_host_enter_clock_gating(hsotg);
 
-		/* After entering suspend, hardware is not accessible */
-		clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+			/* After entering suspend, hardware is not accessible */
+			clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+		}
 		break;
 	default:
 		goto skip_power_saving;
@@ -5193,7 +5191,7 @@ int dwc2_hcd_init(struct dwc2_hsotg *hsotg)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
 		retval = -EINVAL;
-		goto error1;
+		goto error2;
 	}
 	hcd->rsrc_start = res->start;
 	hcd->rsrc_len = resource_size(res);
@@ -5341,6 +5339,8 @@ int dwc2_hcd_init(struct dwc2_hsotg *hsotg)
 
 	/* Don't support SG list at this point */
 	hcd->self.sg_tablesize = 0;
+
+	hcd->tpl_support = of_usb_host_tpl_support(hsotg->dev->of_node);
 
 	if (!IS_ERR_OR_NULL(hsotg->uphy))
 		otg_set_host(hsotg->uphy->otg, &hcd->self);

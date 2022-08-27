@@ -10,12 +10,10 @@
  *
  */
 
-#include <linux/blkdev.h>
 #include <linux/buffer_head.h>
 #include <linux/fs.h>
-#include <linux/nls.h>
+#include <linux/kernel.h>
 
-#include "debug.h"
 #include "ntfs.h"
 #include "ntfs_fs.h"
 
@@ -51,11 +49,6 @@ int __init ntfs3_init_bitmap(void)
 void ntfs3_exit_bitmap(void)
 {
 	kmem_cache_destroy(ntfs_enode_cachep);
-}
-
-static inline u32 wnd_bits(const struct wnd_bitmap *wnd, size_t i)
-{
-	return i + 1 == wnd->nwnd ? wnd->bits_last : wnd->sb->s_blocksize * 8;
 }
 
 /*
@@ -435,7 +428,7 @@ static void wnd_remove_free_ext(struct wnd_bitmap *wnd, size_t bit, size_t len)
 		;
 	} else {
 		n3 = rb_next(&e->count.node);
-		max_new_len = len > new_len ? len : new_len;
+		max_new_len = max(len, new_len);
 		if (!n3) {
 			wnd->extent_max = max_new_len;
 		} else {
@@ -731,7 +724,7 @@ int wnd_set_free(struct wnd_bitmap *wnd, size_t bit, size_t bits)
 			wbits = wnd->bits_last;
 
 		tail = wbits - wbit;
-		op = tail < bits ? tail : bits;
+		op = min_t(u32, tail, bits);
 
 		bh = wnd_map(wnd, iw);
 		if (IS_ERR(bh)) {
@@ -784,7 +777,7 @@ int wnd_set_used(struct wnd_bitmap *wnd, size_t bit, size_t bits)
 			wbits = wnd->bits_last;
 
 		tail = wbits - wbit;
-		op = tail < bits ? tail : bits;
+		op = min_t(u32, tail, bits);
 
 		bh = wnd_map(wnd, iw);
 		if (IS_ERR(bh)) {
@@ -834,7 +827,7 @@ static bool wnd_is_free_hlp(struct wnd_bitmap *wnd, size_t bit, size_t bits)
 			wbits = wnd->bits_last;
 
 		tail = wbits - wbit;
-		op = tail < bits ? tail : bits;
+		op = min_t(u32, tail, bits);
 
 		if (wbits != wnd->free_bits[iw]) {
 			bool ret;
@@ -926,7 +919,7 @@ use_wnd:
 			wbits = wnd->bits_last;
 
 		tail = wbits - wbit;
-		op = tail < bits ? tail : bits;
+		op = min_t(u32, tail, bits);
 
 		if (wnd->free_bits[iw]) {
 			bool ret;
@@ -1335,9 +1328,7 @@ int wnd_extend(struct wnd_bitmap *wnd, size_t new_bits)
 		if (!new_free)
 			return -ENOMEM;
 
-		if (new_free != wnd->free_bits)
-			memcpy(new_free, wnd->free_bits,
-			       wnd->nwnd * sizeof(short));
+		memcpy(new_free, wnd->free_bits, wnd->nwnd * sizeof(short));
 		memset(new_free + wnd->nwnd, 0,
 		       (new_wnd - wnd->nwnd) * sizeof(short));
 		kfree(wnd->free_bits);
@@ -1397,9 +1388,8 @@ int wnd_extend(struct wnd_bitmap *wnd, size_t new_bits)
 
 void wnd_zone_set(struct wnd_bitmap *wnd, size_t lcn, size_t len)
 {
-	size_t zlen;
+	size_t zlen = wnd->zone_end - wnd->zone_bit;
 
-	zlen = wnd->zone_end - wnd->zone_bit;
 	if (zlen)
 		wnd_add_free_ext(wnd, wnd->zone_bit, zlen, false);
 

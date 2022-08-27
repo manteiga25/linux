@@ -175,7 +175,6 @@ static int usb_conn_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct usb_conn_info *info;
-	bool need_vbus = true;
 	int ret = 0;
 
 	info = devm_kzalloc(dev, sizeof(*info), GFP_KERNEL);
@@ -205,22 +204,9 @@ static int usb_conn_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&info->dw_det, usb_conn_detect_cable);
 
-	/*
-	 * If the USB connector is a child of a USB port and that port already provides the VBUS
-	 * supply, there's no need for the USB connector to provide it again.
-	 */
-	if (dev->parent && dev->parent->of_node) {
-		if (of_find_property(dev->parent->of_node, "vbus-supply", NULL))
-			need_vbus = false;
-	}
-
-	if (!need_vbus) {
-		info->vbus = devm_regulator_get_optional(dev, "vbus");
-		if (PTR_ERR(info->vbus) == -ENODEV)
-			info->vbus = NULL;
-	} else {
-		info->vbus = devm_regulator_get(dev, "vbus");
-	}
+	info->vbus = devm_regulator_get_optional(dev, "vbus");
+	if (PTR_ERR(info->vbus) == -ENODEV)
+		info->vbus = NULL;
 
 	if (IS_ERR(info->vbus)) {
 		ret = PTR_ERR(info->vbus);
@@ -271,6 +257,7 @@ static int usb_conn_probe(struct platform_device *pdev)
 	}
 
 	platform_set_drvdata(pdev, info);
+	device_set_wakeup_capable(&pdev->dev, true);
 
 	/* Perform initial detection */
 	usb_conn_queue_dwork(info, 0);
@@ -300,6 +287,14 @@ static int __maybe_unused usb_conn_suspend(struct device *dev)
 {
 	struct usb_conn_info *info = dev_get_drvdata(dev);
 
+	if (device_may_wakeup(dev)) {
+		if (info->id_gpiod)
+			enable_irq_wake(info->id_irq);
+		if (info->vbus_gpiod)
+			enable_irq_wake(info->vbus_irq);
+		return 0;
+	}
+
 	if (info->id_gpiod)
 		disable_irq(info->id_irq);
 	if (info->vbus_gpiod)
@@ -313,6 +308,14 @@ static int __maybe_unused usb_conn_suspend(struct device *dev)
 static int __maybe_unused usb_conn_resume(struct device *dev)
 {
 	struct usb_conn_info *info = dev_get_drvdata(dev);
+
+	if (device_may_wakeup(dev)) {
+		if (info->id_gpiod)
+			disable_irq_wake(info->id_irq);
+		if (info->vbus_gpiod)
+			disable_irq_wake(info->vbus_irq);
+		return 0;
+	}
 
 	pinctrl_pm_select_default_state(dev);
 

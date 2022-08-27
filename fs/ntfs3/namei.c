@@ -5,11 +5,7 @@
  *
  */
 
-#include <linux/blkdev.h>
-#include <linux/buffer_head.h>
 #include <linux/fs.h>
-#include <linux/iversion.h>
-#include <linux/namei.h>
 #include <linux/nls.h>
 
 #include "debug.h"
@@ -99,15 +95,10 @@ static struct dentry *ntfs_lookup(struct inode *dir, struct dentry *dentry,
 static int ntfs_create(struct user_namespace *mnt_userns, struct inode *dir,
 		       struct dentry *dentry, umode_t mode, bool excl)
 {
-	struct ntfs_inode *ni = ntfs_i(dir);
 	struct inode *inode;
-
-	ni_lock_dir(ni);
 
 	inode = ntfs_create_inode(mnt_userns, dir, dentry, NULL, S_IFREG | mode,
 				  0, NULL, 0, NULL);
-
-	ni_unlock(ni);
 
 	return IS_ERR(inode) ? PTR_ERR(inode) : 0;
 }
@@ -120,15 +111,10 @@ static int ntfs_create(struct user_namespace *mnt_userns, struct inode *dir,
 static int ntfs_mknod(struct user_namespace *mnt_userns, struct inode *dir,
 		      struct dentry *dentry, umode_t mode, dev_t rdev)
 {
-	struct ntfs_inode *ni = ntfs_i(dir);
 	struct inode *inode;
-
-	ni_lock_dir(ni);
 
 	inode = ntfs_create_inode(mnt_userns, dir, dentry, NULL, mode, rdev,
 				  NULL, 0, NULL);
-
-	ni_unlock(ni);
 
 	return IS_ERR(inode) ? PTR_ERR(inode) : 0;
 }
@@ -200,14 +186,9 @@ static int ntfs_symlink(struct user_namespace *mnt_userns, struct inode *dir,
 {
 	u32 size = strlen(symname);
 	struct inode *inode;
-	struct ntfs_inode *ni = ntfs_i(dir);
-
-	ni_lock_dir(ni);
 
 	inode = ntfs_create_inode(mnt_userns, dir, dentry, NULL, S_IFLNK | 0777,
 				  0, symname, size, NULL);
-
-	ni_unlock(ni);
 
 	return IS_ERR(inode) ? PTR_ERR(inode) : 0;
 }
@@ -219,20 +200,15 @@ static int ntfs_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
 		      struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode;
-	struct ntfs_inode *ni = ntfs_i(dir);
-
-	ni_lock_dir(ni);
 
 	inode = ntfs_create_inode(mnt_userns, dir, dentry, NULL, S_IFDIR | mode,
 				  0, NULL, 0, NULL);
-
-	ni_unlock(ni);
 
 	return IS_ERR(inode) ? PTR_ERR(inode) : 0;
 }
 
 /*
- * ntfs_rmdir - inode_operations::rm_dir
+ * ntfs_rmdir - inode_operations::rmdir
  */
 static int ntfs_rmdir(struct inode *dir, struct dentry *dentry)
 {
@@ -332,9 +308,7 @@ static int ntfs_rename(struct user_namespace *mnt_userns, struct inode *dir,
 	err = ni_rename(dir_ni, new_dir_ni, ni, de, new_de, &is_bad);
 	if (is_bad) {
 		/* Restore after failed rename failed too. */
-		make_bad_inode(inode);
-		ntfs_inode_err(inode, "failed to undo rename");
-		ntfs_set_state(sbi, NTFS_DIRTY_ERROR);
+		_ntfs_bad_inode(inode);
 	} else if (!err) {
 		inode->i_ctime = dir->i_ctime = dir->i_mtime =
 			current_time(dir);

@@ -1005,7 +1005,7 @@ static int fs_enet_probe(struct platform_device *ofdev)
 	spin_lock_init(&fep->lock);
 	spin_lock_init(&fep->tx_lock);
 
-	of_get_mac_address(ofdev->dev.of_node, ndev->dev_addr);
+	of_get_ethdev_address(ofdev->dev.of_node, ndev);
 
 	ret = fep->ops->allocate_bd(ndev);
 	if (ret)
@@ -1020,7 +1020,8 @@ static int fs_enet_probe(struct platform_device *ofdev)
 	ndev->netdev_ops = &fs_enet_netdev_ops;
 	ndev->watchdog_timeo = 2 * HZ;
 	INIT_WORK(&fep->timeout_work, fs_timeout_work);
-	netif_napi_add(ndev, &fep->napi, fs_enet_napi, fpi->napi_weight);
+	netif_napi_add_weight(ndev, &fep->napi, fs_enet_napi,
+			      fpi->napi_weight);
 
 	ndev->ethtool_ops = &fs_ethtool_ops;
 

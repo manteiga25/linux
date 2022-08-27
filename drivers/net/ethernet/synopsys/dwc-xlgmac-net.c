@@ -81,7 +81,7 @@ static int xlgmac_prep_tso(struct sk_buff *skb,
 	if (ret)
 		return ret;
 
-	pkt_info->header_len = skb_transport_offset(skb) + tcp_hdrlen(skb);
+	pkt_info->header_len = skb_tcp_all_headers(skb);
 	pkt_info->tcp_header_len = tcp_hdrlen(skb);
 	pkt_info->tcp_payload_len = skb->len - pkt_info->header_len;
 	pkt_info->mss = skb_shinfo(skb)->gso_size;
@@ -798,7 +798,7 @@ static int xlgmac_set_mac_address(struct net_device *netdev, void *addr)
 	if (!is_valid_ether_addr(saddr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	memcpy(netdev->dev_addr, saddr->sa_data, netdev->addr_len);
+	eth_hw_addr_set(netdev, saddr->sa_data);
 
 	hw_ops->set_mac_address(pdata, netdev->dev_addr);
 

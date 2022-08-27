@@ -26,6 +26,7 @@
 #include "mgmt/ksmbd_ida.h"
 #include "connection.h"
 #include "transport_tcp.h"
+#include "transport_rdma.h"
 
 #define IPC_WAIT_TIMEOUT	(2 * HZ)
 
@@ -301,6 +302,10 @@ static int ipc_server_config_on_startup(struct ksmbd_startup_request *req)
 		init_smb2_max_write_size(req->smb2_max_write);
 	if (req->smb2_max_trans)
 		init_smb2_max_trans_size(req->smb2_max_trans);
+	if (req->smb2_max_credits)
+		init_smb2_max_credits(req->smb2_max_credits);
+	if (req->smbd_max_io_size)
+		init_smbd_max_io_size(req->smbd_max_io_size);
 
 	ret = ksmbd_set_netbios_name(req->netbios_name);
 	ret |= ksmbd_set_server_string(req->server_string);
@@ -601,7 +606,7 @@ int ksmbd_ipc_tree_disconnect_request(unsigned long long session_id,
 	return ret;
 }
 
-int ksmbd_ipc_logout_request(const char *account)
+int ksmbd_ipc_logout_request(const char *account, int flags)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_logout_request *req;
@@ -616,6 +621,7 @@ int ksmbd_ipc_logout_request(const char *account)
 
 	msg->type = KSMBD_EVENT_LOGOUT_REQUEST;
 	req = (struct ksmbd_logout_request *)msg->payload;
+	req->account_flags = flags;
 	strscpy(req->account, account, KSMBD_REQ_MAX_ACCOUNT_NAME_SZ);
 
 	ret = ipc_msg_send(msg);

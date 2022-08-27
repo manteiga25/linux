@@ -103,7 +103,6 @@ needed).
    block/index
    cdrom/index
    cpu-freq/index
-   ide/index
    fb/index
    fpga/index
    hid/index
@@ -129,7 +128,7 @@ needed).
    sound/index
    crypto/index
    filesystems/index
-   vm/index
+   mm/index
    bpf/index
    usb/index
    PCI/index
@@ -137,6 +136,7 @@ needed).
    misc-devices/index
    scheduler/index
    mhi/index
+   peci/index
 
 Architecture-agnostic documentation
 -----------------------------------
@@ -165,8 +165,8 @@ to ReStructured Text format, or are simply too old.
 .. toctree::
    :maxdepth: 2
 
+   tools/index
    staging/index
-   watch_queue
 
 
 Translations

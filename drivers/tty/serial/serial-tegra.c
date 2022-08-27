@@ -441,7 +441,7 @@ static char tegra_uart_decode_rx_error(struct tegra_uart_port *tup,
 
 	if (unlikely(lsr & TEGRA_UART_LSR_ANY)) {
 		if (lsr & UART_LSR_OE) {
-			/* Overrrun error */
+			/* Overrun error */
 			flag = TTY_OVERRUN;
 			tup->uport.icount.overrun++;
 			dev_dbg(tup->uport.dev, "Got overrun errors\n");
@@ -1080,7 +1080,7 @@ static int tegra_uart_hw_init(struct tegra_uart_port *tup)
 	tup->rx_in_progress = 1;
 
 	/*
-	 * Enable IE_RXS for the receive status interrupts like line errros.
+	 * Enable IE_RXS for the receive status interrupts like line errors.
 	 * Enable IE_RX_TIMEOUT to get the bytes which cannot be DMA'd.
 	 *
 	 * EORD is different interrupt than RX_TIMEOUT - RX_TIMEOUT occurs when
@@ -1277,6 +1277,7 @@ static void tegra_uart_set_termios(struct uart_port *u,
 	unsigned int baud;
 	unsigned long flags;
 	unsigned int lcr;
+	unsigned char char_bits;
 	int symb_bit = 1;
 	struct clk *parent_clk = clk_get_parent(tup->uart_clk);
 	unsigned long parent_clk_rate = clk_get_rate(parent_clk);
@@ -1316,25 +1317,10 @@ static void tegra_uart_set_termios(struct uart_port *u,
 		}
 	}
 
+	char_bits = tty_get_char_size(termios->c_cflag);
+	symb_bit += char_bits;
 	lcr &= ~UART_LCR_WLEN8;
-	switch (termios->c_cflag & CSIZE) {
-	case CS5:
-		lcr |= UART_LCR_WLEN5;
-		symb_bit += 5;
-		break;
-	case CS6:
-		lcr |= UART_LCR_WLEN6;
-		symb_bit += 6;
-		break;
-	case CS7:
-		lcr |= UART_LCR_WLEN7;
-		symb_bit += 7;
-		break;
-	default:
-		lcr |= UART_LCR_WLEN8;
-		symb_bit += 8;
-		break;
-	}
+	lcr |= UART_LCR_WLEN(char_bits);
 
 	/* Stop bits */
 	if (termios->c_cflag & CSTOPB) {
@@ -1506,7 +1492,7 @@ static struct tegra_uart_chip_data tegra20_uart_chip_data = {
 	.fifo_mode_enable_status	= false,
 	.uart_max_port			= 5,
 	.max_dma_burst_bytes		= 4,
-	.error_tolerance_low_range	= 0,
+	.error_tolerance_low_range	= -4,
 	.error_tolerance_high_range	= 4,
 };
 
@@ -1517,7 +1503,7 @@ static struct tegra_uart_chip_data tegra30_uart_chip_data = {
 	.fifo_mode_enable_status	= false,
 	.uart_max_port			= 5,
 	.max_dma_burst_bytes		= 4,
-	.error_tolerance_low_range	= 0,
+	.error_tolerance_low_range	= -4,
 	.error_tolerance_high_range	= 4,
 };
 
@@ -1681,6 +1667,7 @@ static int __init tegra_uart_init(void)
 	node = of_find_matching_node(NULL, tegra_uart_of_match);
 	if (node)
 		match = of_match_node(tegra_uart_of_match, node);
+	of_node_put(node);
 	if (match)
 		cdata = match->data;
 	if (cdata)

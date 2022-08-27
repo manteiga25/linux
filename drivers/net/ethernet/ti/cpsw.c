@@ -335,7 +335,7 @@ static void cpsw_ndo_set_rx_mode(struct net_device *ndev)
 
 static unsigned int cpsw_rxbuf_total_len(unsigned int len)
 {
-	len += CPSW_HEADROOM;
+	len += CPSW_HEADROOM_NA;
 	len += SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 
 	return SKB_DATA_ALIGN(len);
@@ -349,7 +349,7 @@ static void cpsw_rx_handler(void *token, int len, int status)
 	struct cpsw_common	*cpsw = ndev_to_cpsw(xmeta->ndev);
 	int			pkt_size = cpsw->rx_packet_max;
 	int			ret = 0, port, ch = xmeta->ch;
-	int			headroom = CPSW_HEADROOM;
+	int			headroom = CPSW_HEADROOM_NA;
 	struct net_device	*ndev = xmeta->ndev;
 	struct cpsw_priv	*priv;
 	struct page_pool	*pool;
@@ -392,7 +392,7 @@ static void cpsw_rx_handler(void *token, int len, int status)
 	}
 
 	if (priv->xdp_prog) {
-		int headroom = CPSW_HEADROOM, size = len;
+		int size = len;
 
 		xdp_init_buff(&xdp, PAGE_SIZE, &priv->xdp_rxq[ch]);
 		if (status & CPDMA_RX_VLAN_ENCAP) {
@@ -442,7 +442,7 @@ requeue:
 	xmeta->ndev = ndev;
 	xmeta->ch = ch;
 
-	dma = page_pool_get_dma_addr(new_page) + CPSW_HEADROOM;
+	dma = page_pool_get_dma_addr(new_page) + CPSW_HEADROOM_NA;
 	ret = cpdma_chan_submit_mapped(cpsw->rxv[ch].ch, new_page, dma,
 				       pkt_size, 0);
 	if (ret < 0) {
@@ -756,11 +756,9 @@ static int cpsw_ndo_open(struct net_device *ndev)
 	int ret;
 	u32 reg;
 
-	ret = pm_runtime_get_sync(cpsw->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(cpsw->dev);
+	ret = pm_runtime_resume_and_get(cpsw->dev);
+	if (ret < 0)
 		return ret;
-	}
 
 	netif_carrier_off(ndev);
 
@@ -968,11 +966,9 @@ static int cpsw_ndo_set_mac_address(struct net_device *ndev, void *p)
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	ret = pm_runtime_get_sync(cpsw->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(cpsw->dev);
+	ret = pm_runtime_resume_and_get(cpsw->dev);
+	if (ret < 0)
 		return ret;
-	}
 
 	if (cpsw->data.dual_emac) {
 		vid = cpsw->slaves[priv->emac_port].port_vlan;
@@ -985,7 +981,7 @@ static int cpsw_ndo_set_mac_address(struct net_device *ndev, void *p)
 			   flags, vid);
 
 	memcpy(priv->mac_addr, addr->sa_data, ETH_ALEN);
-	memcpy(ndev->dev_addr, priv->mac_addr, ETH_ALEN);
+	eth_hw_addr_set(ndev, priv->mac_addr);
 	for_each_slave(priv, cpsw_set_slave_mac, priv);
 
 	pm_runtime_put(cpsw->dev);
@@ -1052,11 +1048,9 @@ static int cpsw_ndo_vlan_rx_add_vid(struct net_device *ndev,
 	if (vid == cpsw->data.default_vlan)
 		return 0;
 
-	ret = pm_runtime_get_sync(cpsw->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(cpsw->dev);
+	ret = pm_runtime_resume_and_get(cpsw->dev);
+	if (ret < 0)
 		return ret;
-	}
 
 	if (cpsw->data.dual_emac) {
 		/* In dual EMAC, reserved VLAN id should not be used for
@@ -1090,11 +1084,9 @@ static int cpsw_ndo_vlan_rx_kill_vid(struct net_device *ndev,
 	if (vid == cpsw->data.default_vlan)
 		return 0;
 
-	ret = pm_runtime_get_sync(cpsw->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(cpsw->dev);
+	ret = pm_runtime_resume_and_get(cpsw->dev);
+	if (ret < 0)
 		return ret;
-	}
 
 	if (cpsw->data.dual_emac) {
 		int i;
@@ -1460,7 +1452,7 @@ static int cpsw_probe_dual_emac(struct cpsw_priv *priv)
 		dev_info(cpsw->dev, "cpsw: Random MACID = %pM\n",
 			 priv_sl2->mac_addr);
 	}
-	memcpy(ndev->dev_addr, priv_sl2->mac_addr, ETH_ALEN);
+	eth_hw_addr_set(ndev, priv_sl2->mac_addr);
 
 	priv_sl2->emac_port = 1;
 	cpsw->slaves[1].ndev = ndev;
@@ -1567,11 +1559,9 @@ static int cpsw_probe(struct platform_device *pdev)
 	/* Need to enable clocks with runtime PM api to access module
 	 * registers
 	 */
-	ret = pm_runtime_get_sync(dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(dev);
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret < 0)
 		goto clean_runtime_disable_ret;
-	}
 
 	ret = cpsw_probe_dt(&cpsw->data, pdev);
 	if (ret)
@@ -1639,7 +1629,7 @@ static int cpsw_probe(struct platform_device *pdev)
 		dev_info(dev, "Random MACID = %pM\n", priv->mac_addr);
 	}
 
-	memcpy(ndev->dev_addr, priv->mac_addr, ETH_ALEN);
+	eth_hw_addr_set(ndev, priv->mac_addr);
 
 	cpsw->slaves[0].ndev = ndev;
 
@@ -1649,10 +1639,9 @@ static int cpsw_probe(struct platform_device *pdev)
 	ndev->ethtool_ops = &cpsw_ethtool_ops;
 	netif_napi_add(ndev, &cpsw->napi_rx,
 		       cpsw->quirk_irq ? cpsw_rx_poll : cpsw_rx_mq_poll,
-		       CPSW_POLL_WEIGHT);
-	netif_tx_napi_add(ndev, &cpsw->napi_tx,
-			  cpsw->quirk_irq ? cpsw_tx_poll : cpsw_tx_mq_poll,
-			  CPSW_POLL_WEIGHT);
+		       NAPI_POLL_WEIGHT);
+	netif_napi_add_tx(ndev, &cpsw->napi_tx,
+			  cpsw->quirk_irq ? cpsw_tx_poll : cpsw_tx_mq_poll);
 
 	/* register the network device */
 	SET_NETDEV_DEV(ndev, dev);
@@ -1734,11 +1723,9 @@ static int cpsw_remove(struct platform_device *pdev)
 	struct cpsw_common *cpsw = platform_get_drvdata(pdev);
 	int i, ret;
 
-	ret = pm_runtime_get_sync(&pdev->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(&pdev->dev);
+	ret = pm_runtime_resume_and_get(&pdev->dev);
+	if (ret < 0)
 		return ret;
-	}
 
 	for (i = 0; i < cpsw->data.slaves; i++)
 		if (cpsw->slaves[i].ndev)

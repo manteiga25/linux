@@ -47,17 +47,6 @@ enum ipa_cmd_opcode {
 };
 
 /**
- * struct ipa_cmd_info - information needed for an IPA immediate command
- *
- * @opcode:	The command opcode.
- * @direction:	Direction of data transfer for DMA commands
- */
-struct ipa_cmd_info {
-	enum ipa_cmd_opcode opcode;
-	enum dma_data_direction direction;
-};
-
-/**
  * ipa_cmd_table_valid() - Validate a memory region holding a table
  * @ipa:	- IPA pointer
  * @mem:	- IPA memory region descriptor
@@ -162,12 +151,6 @@ u32 ipa_cmd_pipeline_clear_count(void);
  * @ipa:	- IPA pointer
  */
 void ipa_cmd_pipeline_clear_wait(struct ipa *ipa);
-
-/**
- * ipa_cmd_pipeline_clear() - Clear the hardware pipeline
- * @ipa:	- IPA pointer
- */
-void ipa_cmd_pipeline_clear(struct ipa *ipa);
 
 /**
  * ipa_cmd_trans_alloc() - Allocate a transaction for the command TX endpoint

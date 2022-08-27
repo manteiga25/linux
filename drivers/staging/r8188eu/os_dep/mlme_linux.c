@@ -25,8 +25,6 @@ static void _dynamic_check_timer_handlder(struct timer_list *t)
 {
 	struct adapter *adapter = from_timer(adapter, t, mlmepriv.dynamic_chk_timer);
 
-	if (adapter->registrypriv.mp_mode == 1)
-		return;
 	rtw_dynamic_check_timer_handlder(adapter);
 	_set_timer(&adapter->mlmepriv.dynamic_chk_timer, 2000);
 }
@@ -68,7 +66,6 @@ void rtw_reset_securitypriv(struct adapter *adapter)
 		/*  We have to backup the PMK information for WiFi PMK Caching test item. */
 		/*  Backup the btkip_countermeasure information. */
 		/*  When the countermeasure is trigger, the driver have to disconnect with AP for 60 seconds. */
-		memset(&backup_pmkid[0], 0x00, sizeof(struct rt_pmkid_list) * NUM_PMKID_CACHE);
 		memcpy(&backup_pmkid[0], &adapter->securitypriv.PMKIDList[0], sizeof(struct rt_pmkid_list) * NUM_PMKID_CACHE);
 		backup_index = adapter->securitypriv.PMKIDIndex;
 		backup_counter = adapter->securitypriv.btkip_countermeasure;
@@ -114,7 +111,7 @@ void rtw_report_sec_ie(struct adapter *adapter, u8 authmode, u8 *sec_ie)
 
 	buff = NULL;
 	if (authmode == _WPA_IE_ID_) {
-		buff = kzalloc(IW_CUSTOM_MAX, GFP_KERNEL);
+		buff = kzalloc(IW_CUSTOM_MAX, GFP_ATOMIC);
 		if (!buff)
 			return;
 		p = buff;
@@ -165,8 +162,6 @@ void init_mlme_ext_timer(struct adapter *padapter)
 	timer_setup(&pmlmeext->link_timer, _link_timer_hdl, 0);
 }
 
-#ifdef CONFIG_88EU_AP_MODE
-
 void rtw_indicate_sta_assoc_event(struct adapter *padapter, struct sta_info *psta)
 {
 	union iwreq_data wrqu;
@@ -184,8 +179,6 @@ void rtw_indicate_sta_assoc_event(struct adapter *padapter, struct sta_info *pst
 	wrqu.addr.sa_family = ARPHRD_ETHER;
 
 	memcpy(wrqu.addr.sa_data, psta->hwaddr, ETH_ALEN);
-
-	DBG_88E("+rtw_indicate_sta_assoc_event\n");
 
 	wireless_send_event(padapter->pnetdev, IWEVREGISTERED, &wrqu, NULL);
 }
@@ -208,9 +201,5 @@ void rtw_indicate_sta_disassoc_event(struct adapter *padapter, struct sta_info *
 
 	memcpy(wrqu.addr.sa_data, psta->hwaddr, ETH_ALEN);
 
-	DBG_88E("+rtw_indicate_sta_disassoc_event\n");
-
 	wireless_send_event(padapter->pnetdev, IWEVEXPIRED, &wrqu, NULL);
 }
-
-#endif

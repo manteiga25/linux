@@ -38,8 +38,6 @@
 #include "type_support.h"
 #include "device_access/device_access.h"
 
-#include "atomisp_acc.h"
-
 #define ISP_LEFT_PAD			128	/* equal to 2*NWAY */
 
 /*
@@ -464,13 +462,11 @@ int atomisp_qbuffers_to_css(struct atomisp_sub_device *asd)
 		css_capture_pipe_id = IA_CSS_PIPE_ID_CAPTURE;
 	}
 
-#ifdef ISP2401_NEW_INPUT_SYSTEM
-	if (asd->copy_mode) {
+	if (IS_ISP2401 && asd->copy_mode) {
 		css_capture_pipe_id = IA_CSS_PIPE_ID_COPY;
 		css_preview_pipe_id = IA_CSS_PIPE_ID_COPY;
 		css_video_pipe_id = IA_CSS_PIPE_ID_COPY;
 	}
-#endif
 
 	if (asd->yuvpp_mode) {
 		capture_pipe = &asd->video_out_capture;
@@ -772,6 +768,30 @@ static int atomisp_open(struct file *file)
 
 	dev_dbg(isp->dev, "open device %s\n", vdev->name);
 
+	/*
+	 * Ensure that if we are still loading we block. Once the loading
+	 * is over we can proceed. We can't blindly hold the lock until
+	 * that occurs as if the load fails we'll deadlock the unload
+	 */
+	rt_mutex_lock(&isp->loading);
+	/*
+	 * FIXME: revisit this with a better check once the code structure
+	 * is cleaned up a bit more
+	 */
+	ret = v4l2_fh_open(file);
+	if (ret) {
+		dev_err(isp->dev,
+			"%s: v4l2_fh_open() returned error %d\n",
+		       __func__, ret);
+		rt_mutex_unlock(&isp->loading);
+		return ret;
+	}
+	if (!isp->ready) {
+		rt_mutex_unlock(&isp->loading);
+		return -ENXIO;
+	}
+	rt_mutex_unlock(&isp->loading);
+
 	rt_mutex_lock(&isp->mutex);
 
 	acc_node = !strcmp(vdev->name, "ATOMISP ISP ACC");
@@ -843,12 +863,6 @@ dev_init:
 		goto error;
 	}
 
-	if (dypool_enable) {
-		ret = hmm_pool_register(dypool_pgnr, HMM_POOL_TYPE_DYNAMIC);
-		if (ret)
-			dev_err(isp->dev, "Failed to register dynamic memory pool.\n");
-	}
-
 	/* Init ISP */
 	if (atomisp_css_init(isp)) {
 		ret = -EINVAL;
@@ -877,13 +891,17 @@ done:
 	else
 		pipe->users++;
 	rt_mutex_unlock(&isp->mutex);
+
+	/* Ensure that a mode is set */
+	if (!acc_node)
+		v4l2_ctrl_s_ctrl(asd->run_mode, pipe->default_run_mode);
+
 	return 0;
 
 css_error:
 	atomisp_css_uninit(isp);
 	pm_runtime_put(vdev->v4l2_dev->dev);
 error:
-	hmm_pool_unregister(HMM_POOL_TYPE_DYNAMIC);
 	rt_mutex_unlock(&isp->mutex);
 	return ret;
 }
@@ -994,8 +1012,6 @@ subdev_uninit:
 	if (atomisp_dev_users(isp))
 		goto done;
 
-	atomisp_acc_release(asd);
-
 	atomisp_destroy_pipes_stream_force(asd);
 	atomisp_css_uninit(isp);
 
@@ -1004,8 +1020,6 @@ subdev_uninit:
 		isp->css_env.isp_css_fw.data = NULL;
 		isp->css_env.isp_css_fw.bytes = 0;
 	}
-
-	hmm_pool_unregister(HMM_POOL_TYPE_DYNAMIC);
 
 	ret = v4l2_subdev_call(isp->flash, core, s_power, 0);
 	if (ret < 0 && ret != -ENODEV && ret != -ENOIOCTLCMD)
@@ -1025,7 +1039,7 @@ done:
 	rt_mutex_unlock(&isp->mutex);
 	mutex_unlock(&isp->streamoff_mutex);
 
-	return 0;
+	return v4l2_fh_release(file);
 }
 
 /*
@@ -1067,7 +1081,7 @@ static int frame_mmap(struct atomisp_device *isp,
 
 	host_virt = vma->vm_start;
 	isp_virt = frame->data;
-	atomisp_get_frame_pgnr(isp, frame, &pgnr);
+	pgnr = DIV_ROUND_UP(frame->data_bytes, PAGE_SIZE);
 
 	if (do_isp_mm_remap(isp, vma, isp_virt, host_virt, pgnr))
 		return -EAGAIN;
@@ -1170,6 +1184,12 @@ static int atomisp_mmap(struct file *file, struct vm_area_struct *vma)
 	u32 size = end - start;
 	u32 origin_size, new_size;
 	int ret;
+
+	if (!asd) {
+		dev_err(isp->dev, "%s(): asd is NULL, device is %s\n",
+			__func__, vdev->name);
+		return -EINVAL;
+	}
 
 	if (!(vma->vm_flags & (VM_WRITE | VM_READ)))
 		return -EACCES;

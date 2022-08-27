@@ -241,10 +241,8 @@ static int ad7746_select_channel(struct iio_dev *indio_dev,
 		if (ret < 0)
 			return ret;
 
-		if (chip->capdac_set != chan->channel) {
-
+		if (chip->capdac_set != chan->channel)
 			chip->capdac_set = chan->channel;
-		}
 		break;
 	case IIO_VOLTAGE:
 	case IIO_TEMP:
@@ -292,7 +290,7 @@ static inline ssize_t ad7746_start_calib(struct device *dev,
 	int ret, timeout = 10;
 	bool doit;
 
-	ret = strtobool(buf, &doit);
+	ret = kstrtobool(buf, &doit);
 	if (ret < 0)
 		return ret;
 

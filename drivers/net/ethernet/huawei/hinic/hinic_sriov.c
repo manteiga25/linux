@@ -8,6 +8,7 @@
 #include <linux/interrupt.h>
 #include <linux/etherdevice.h>
 #include <linux/netdevice.h>
+#include <linux/module.h>
 
 #include "hinic_hw_dev.h"
 #include "hinic_dev.h"
@@ -848,12 +849,6 @@ int hinic_ndo_set_vf_bw(struct net_device *netdev,
 	if (vf >= nic_dev->sriov_info.num_vfs) {
 		netif_err(nic_dev, drv, netdev, "VF number must be less than %d\n",
 			  nic_dev->sriov_info.num_vfs);
-		return -EINVAL;
-	}
-
-	if (max_tx_rate < min_tx_rate) {
-		netif_err(nic_dev, drv, netdev, "Max rate %d must be greater than or equal to min rate %d\n",
-			  max_tx_rate, min_tx_rate);
 		return -EINVAL;
 	}
 

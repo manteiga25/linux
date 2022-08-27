@@ -150,7 +150,8 @@ static inline void release_thread(struct task_struct *dead_task)
 {
 }
 
-unsigned long get_wchan(struct task_struct *p);
+unsigned long __get_wchan(struct task_struct *p);
+void show_registers(struct pt_regs *regs);
 
 #define	KSTK_EIP(tsk)	\
     ({			\

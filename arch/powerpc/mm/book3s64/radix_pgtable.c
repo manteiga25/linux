@@ -33,7 +33,6 @@
 
 #include <trace/events/thp.h>
 
-unsigned int mmu_pid_bits;
 unsigned int mmu_base_pid;
 unsigned long radix_mem_block_size __ro_after_init;
 
@@ -335,7 +334,7 @@ static void __init radix_init_pgtable(void)
 	u64 i;
 
 	/* We don't support slb for radix */
-	mmu_slb_size = 0;
+	slb_set_size(0);
 
 	/*
 	 * Create the linear mapping
@@ -357,18 +356,13 @@ static void __init radix_init_pgtable(void)
 						-1, PAGE_KERNEL));
 	}
 
-	/* Find out how many PID bits are supported */
 	if (!cpu_has_feature(CPU_FTR_HVMODE) &&
 			cpu_has_feature(CPU_FTR_P9_RADIX_PREFETCH_BUG)) {
 		/*
-		 * Older versions of KVM on these machines perfer if the
+		 * Older versions of KVM on these machines prefer if the
 		 * guest only uses the low 19 PID bits.
 		 */
-		if (!mmu_pid_bits)
-			mmu_pid_bits = 19;
-	} else {
-		if (!mmu_pid_bits)
-			mmu_pid_bits = 20;
+		mmu_pid_bits = 19;
 	}
 	mmu_base_pid = 1;
 
@@ -449,11 +443,6 @@ static int __init radix_dt_scan_page_sizes(unsigned long node,
 	if (type == NULL || strcmp(type, "cpu") != 0)
 		return 0;
 
-	/* Find MMU PID size */
-	prop = of_get_flat_dt_prop(node, "ibm,mmu-pid-bits", &size);
-	if (prop && size == 4)
-		mmu_pid_bits = be32_to_cpup(prop);
-
 	/* Grab page size encodings */
 	prop = of_get_flat_dt_prop(node, "ibm,processor-radix-AP-encodings", &size);
 	if (!prop)
@@ -510,7 +499,7 @@ static int __init probe_memory_block_size(unsigned long node, const char *uname,
 	return 1;
 }
 
-static unsigned long radix_memory_block_size(void)
+static unsigned long __init radix_memory_block_size(void)
 {
 	unsigned long mem_block_size = MIN_MEMORY_BLOCK_SIZE;
 
@@ -528,7 +517,7 @@ static unsigned long radix_memory_block_size(void)
 
 #else   /* CONFIG_MEMORY_HOTPLUG */
 
-static unsigned long radix_memory_block_size(void)
+static unsigned long __init radix_memory_block_size(void)
 {
 	return 1UL * 1024 * 1024 * 1024;
 }
@@ -572,22 +561,11 @@ void __init radix__early_init_devtree(void)
 	return;
 }
 
-static void radix_init_amor(void)
-{
-	/*
-	* In HV mode, we init AMOR (Authority Mask Override Register) so that
-	* the hypervisor and guest can setup IAMR (Instruction Authority Mask
-	* Register), enable key 0 and set it to 1.
-	*
-	* AMOR = 0b1100 .... 0000 (Mask for key 0 is 11)
-	*/
-	mtspr(SPRN_AMOR, (3ul << 62));
-}
-
 void __init radix__early_init_mmu(void)
 {
 	unsigned long lpcr;
 
+#ifdef CONFIG_PPC_64S_HASH_MMU
 #ifdef CONFIG_PPC_64K_PAGES
 	/* PAGE_SIZE mappings */
 	mmu_virtual_psize = MMU_PAGE_64K;
@@ -604,6 +582,7 @@ void __init radix__early_init_mmu(void)
 		mmu_vmemmap_psize = MMU_PAGE_2M;
 	} else
 		mmu_vmemmap_psize = mmu_virtual_psize;
+#endif
 #endif
 	/*
 	 * initialize page table size
@@ -644,7 +623,6 @@ void __init radix__early_init_mmu(void)
 		lpcr = mfspr(SPRN_LPCR);
 		mtspr(SPRN_LPCR, lpcr | LPCR_UPRT | LPCR_HR);
 		radix_init_partition_table();
-		radix_init_amor();
 	} else {
 		radix_init_pseries();
 	}
@@ -668,8 +646,6 @@ void radix__early_init_mmu_secondary(void)
 
 		set_ptcr_when_no_uv(__pa(partition_tb) |
 				    (PATB_SIZE_SHIFT - 12));
-
-		radix_init_amor();
 	}
 
 	radix__switch_mmu_context(NULL, &init_mm);
@@ -920,6 +896,13 @@ void __meminit radix__vmemmap_remove_mapping(unsigned long start, unsigned long 
 #endif
 #endif
 
+#ifdef CONFIG_DEBUG_PAGEALLOC
+void radix__kernel_map_pages(struct page *page, int numpages, int enable)
+{
+	pr_warn_once("DEBUG_PAGEALLOC not supported in radix mode\n");
+}
+#endif
+
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 
 unsigned long radix__pmd_hugepage_update(struct mm_struct *mm, unsigned long addr,
@@ -1035,16 +1018,21 @@ void radix__ptep_set_access_flags(struct vm_area_struct *vma, pte_t *ptep,
 
 	unsigned long change = pte_val(entry) ^ pte_val(*ptep);
 	/*
-	 * To avoid NMMU hang while relaxing access, we need mark
-	 * the pte invalid in between.
+	 * On POWER9, the NMMU is not able to relax PTE access permissions
+	 * for a translation with a TLB. The PTE must be invalidated, TLB
+	 * flushed before the new PTE is installed.
+	 *
+	 * This only needs to be done for radix, because hash translation does
+	 * flush when updating the linux pte (and we don't support NMMU
+	 * accelerators on HPT on POWER9 anyway XXX: do we?).
+	 *
+	 * POWER10 (and P9P) NMMU does behave as per ISA.
 	 */
-	if ((change & _PAGE_RW) && atomic_read(&mm->context.copros) > 0) {
+	if (!cpu_has_feature(CPU_FTR_ARCH_31) && (change & _PAGE_RW) &&
+	    atomic_read(&mm->context.copros) > 0) {
 		unsigned long old_pte, new_pte;
 
 		old_pte = __radix_pte_update(ptep, _PAGE_PRESENT, _PAGE_INVALID);
-		/*
-		 * new value of pte
-		 */
 		new_pte = old_pte | set;
 		radix__flush_tlb_page_psize(mm, address, psize);
 		__radix_pte_update(ptep, _PAGE_INVALID, new_pte);
@@ -1052,9 +1040,12 @@ void radix__ptep_set_access_flags(struct vm_area_struct *vma, pte_t *ptep,
 		__radix_pte_update(ptep, 0, set);
 		/*
 		 * Book3S does not require a TLB flush when relaxing access
-		 * restrictions when the address space is not attached to a
-		 * NMMU, because the core MMU will reload the pte after taking
-		 * an access fault, which is defined by the architecture.
+		 * restrictions when the address space (modulo the POWER9 nest
+		 * MMU issue above) because the MMU will reload the PTE after
+		 * taking an access fault, as defined by the architecture. See
+		 * "Setting a Reference or Change Bit or Upgrading Access
+		 *  Authority (PTE Subject to Atomic Hardware Updates)" in
+		 *  Power ISA Version 3.1B.
 		 */
 	}
 	/* See ptesync comment in radix__set_pte_at */
@@ -1067,11 +1058,12 @@ void radix__ptep_modify_prot_commit(struct vm_area_struct *vma,
 	struct mm_struct *mm = vma->vm_mm;
 
 	/*
-	 * To avoid NMMU hang while relaxing access we need to flush the tlb before
-	 * we set the new value. We need to do this only for radix, because hash
-	 * translation does flush when updating the linux pte.
+	 * POWER9 NMMU must flush the TLB after clearing the PTE before
+	 * installing a PTE with more relaxed access permissions, see
+	 * radix__ptep_set_access_flags.
 	 */
-	if (is_pte_rw_upgrade(pte_val(old_pte), pte_val(pte)) &&
+	if (!cpu_has_feature(CPU_FTR_ARCH_31) &&
+	    is_pte_rw_upgrade(pte_val(old_pte), pte_val(pte)) &&
 	    (atomic_read(&mm->context.copros) > 0))
 		radix__flush_tlb_page(vma, addr);
 
@@ -1093,7 +1085,7 @@ int pud_set_huge(pud_t *pud, phys_addr_t addr, pgprot_t prot)
 
 int pud_clear_huge(pud_t *pud)
 {
-	if (pud_huge(*pud)) {
+	if (pud_is_leaf(*pud)) {
 		pud_clear(pud);
 		return 1;
 	}
@@ -1140,7 +1132,7 @@ int pmd_set_huge(pmd_t *pmd, phys_addr_t addr, pgprot_t prot)
 
 int pmd_clear_huge(pmd_t *pmd)
 {
-	if (pmd_huge(*pmd)) {
+	if (pmd_is_leaf(*pmd)) {
 		pmd_clear(pmd);
 		return 1;
 	}

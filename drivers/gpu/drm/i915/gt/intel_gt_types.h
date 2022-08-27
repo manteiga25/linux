@@ -11,21 +11,25 @@
 #include <linux/llist.h>
 #include <linux/mutex.h>
 #include <linux/notifier.h>
+#include <linux/seqlock.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
 #include "uc/intel_uc.h"
+#include "intel_gsc.h"
 
 #include "i915_vma.h"
 #include "intel_engine_types.h"
 #include "intel_gt_buffer_pool_types.h"
+#include "intel_hwconfig.h"
 #include "intel_llc_types.h"
 #include "intel_reset_types.h"
 #include "intel_rc6_types.h"
 #include "intel_rps_types.h"
 #include "intel_migrate_types.h"
 #include "intel_wakeref.h"
+#include "pxp/intel_pxp_types.h"
 
 struct drm_i915_private;
 struct i915_ggtt;
@@ -56,6 +60,13 @@ enum intel_steering_type {
 	MSLICE,
 	LNCF,
 
+	/*
+	 * On some platforms there are multiple types of MCR registers that
+	 * will always return a non-terminated value at instance (0, 0).  We'll
+	 * lump those all into a single category to keep things simple.
+	 */
+	INSTANCE0,
+
 	NUM_STEERING_TYPES
 };
 
@@ -71,6 +82,26 @@ struct intel_gt {
 	struct i915_ggtt *ggtt;
 
 	struct intel_uc uc;
+	struct intel_gsc gsc;
+
+	struct {
+		/* Serialize global tlb invalidations */
+		struct mutex invalidate_lock;
+
+		/*
+		 * Batch TLB invalidations
+		 *
+		 * After unbinding the PTE, we need to ensure the TLB
+		 * are invalidated prior to releasing the physical pages.
+		 * But we only need one such invalidation for all unbinds,
+		 * so we track how many TLB invalidations have been
+		 * performed since unbind the PTE and only emit an extra
+		 * invalidate if no full barrier has been passed.
+		 */
+		seqcount_mutex_t seqno;
+	} tlb;
+
+	struct i915_wa_list wa_list;
 
 	struct intel_gt_timelines {
 		spinlock_t lock; /* protects active_list */
@@ -177,12 +208,27 @@ struct intel_gt {
 
 	const struct intel_mmio_range *steering_table[NUM_STEERING_TYPES];
 
+	struct {
+		u8 groupid;
+		u8 instanceid;
+	} default_steering;
+
+	/*
+	 * Base of per-tile GTTMMADR where we can derive the MMIO and the GGTT.
+	 */
+	phys_addr_t phys_addr;
+
 	struct intel_gt_info {
+		unsigned int id;
+
 		intel_engine_mask_t engine_mask;
 
 		u32 l3bank_mask;
 
 		u8 num_engines;
+
+		/* General presence of SFC units */
+		u8 sfc_mask;
 
 		/* Media engine access to SFC per instance */
 		u8 vdbox_sfc_access;
@@ -191,7 +237,20 @@ struct intel_gt {
 		struct sseu_dev_info sseu;
 
 		unsigned long mslice_mask;
+
+		/** @hwconfig: hardware configuration data */
+		struct intel_hwconfig hwconfig;
 	} info;
+
+	struct {
+		u8 uc_index;
+		u8 wb_index; /* Only used on HAS_L3_CCS_READ() platforms */
+	} mocs;
+
+	struct intel_pxp pxp;
+
+	/* gt/gtN sysfs */
+	struct kobject sysfs_gt;
 };
 
 enum intel_gt_scratch_field {

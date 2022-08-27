@@ -207,6 +207,8 @@ static int brcmf_init_nvram_parser(struct nvram_parser *nvp,
 		size = BRCMF_FW_MAX_NVRAM_SIZE;
 	else
 		size = data_len;
+	/* Add space for properties we may add */
+	size += strlen(BRCMF_FW_DEFAULT_BOARDREV) + 1;
 	/* Alloc for extra 0 byte + roundup by 4 + length field */
 	size += 1 + 3 + sizeof(u32);
 	nvp->nvram = kzalloc(size, GFP_KERNEL);
@@ -457,43 +459,34 @@ static void brcmf_fw_fix_efi_nvram_ccode(char *data, unsigned long data_len)
 
 static u8 *brcmf_fw_nvram_from_efi(size_t *data_len_ret)
 {
-	const u16 name[] = { 'n', 'v', 'r', 'a', 'm', 0 };
-	struct efivar_entry *nvram_efivar;
+	efi_guid_t guid = EFI_GUID(0x74b00bd9, 0x805a, 0x4d61, 0xb5, 0x1f,
+				   0x43, 0x26, 0x81, 0x23, 0xd1, 0x13);
 	unsigned long data_len = 0;
+	efi_status_t status;
 	u8 *data = NULL;
-	int err;
 
-	nvram_efivar = kzalloc(sizeof(*nvram_efivar), GFP_KERNEL);
-	if (!nvram_efivar)
+	if (!efi_rt_services_supported(EFI_RT_SUPPORTED_GET_VARIABLE))
 		return NULL;
 
-	memcpy(&nvram_efivar->var.VariableName, name, sizeof(name));
-	nvram_efivar->var.VendorGuid = EFI_GUID(0x74b00bd9, 0x805a, 0x4d61,
-						0xb5, 0x1f, 0x43, 0x26,
-						0x81, 0x23, 0xd1, 0x13);
-
-	err = efivar_entry_size(nvram_efivar, &data_len);
-	if (err)
+	status = efi.get_variable(L"nvram", &guid, NULL, &data_len, NULL);
+	if (status != EFI_BUFFER_TOO_SMALL)
 		goto fail;
 
 	data = kmalloc(data_len, GFP_KERNEL);
 	if (!data)
 		goto fail;
 
-	err = efivar_entry_get(nvram_efivar, NULL, &data_len, data);
-	if (err)
+	status = efi.get_variable(L"nvram", &guid, NULL, &data_len, data);
+	if (status != EFI_SUCCESS)
 		goto fail;
 
 	brcmf_fw_fix_efi_nvram_ccode(data, data_len);
 	brcmf_info("Using nvram EFI variable\n");
 
-	kfree(nvram_efivar);
 	*data_len_ret = data_len;
 	return data;
-
 fail:
 	kfree(data);
-	kfree(nvram_efivar);
 	return NULL;
 }
 #else
@@ -693,7 +686,7 @@ int brcmf_fw_get_firmwares(struct device *dev, struct brcmf_fw_request *req,
 {
 	struct brcmf_fw_item *first = &req->items[0];
 	struct brcmf_fw *fwctx;
-	char *alt_path;
+	char *alt_path = NULL;
 	int ret;
 
 	brcmf_dbg(TRACE, "enter: dev=%s\n", dev_name(dev));
@@ -712,7 +705,9 @@ int brcmf_fw_get_firmwares(struct device *dev, struct brcmf_fw_request *req,
 	fwctx->done = fw_cb;
 
 	/* First try alternative board-specific path if any */
-	alt_path = brcm_alt_fw_path(first->path, fwctx->req->board_type);
+	if (fwctx->req->board_type)
+		alt_path = brcm_alt_fw_path(first->path,
+					    fwctx->req->board_type);
 	if (alt_path) {
 		ret = request_firmware_nowait(THIS_MODULE, true, alt_path,
 					      fwctx->dev, GFP_KERNEL, fwctx,

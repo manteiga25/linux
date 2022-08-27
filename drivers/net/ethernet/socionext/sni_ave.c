@@ -1599,7 +1599,7 @@ static int ave_probe(struct platform_device *pdev)
 
 	ndev->max_mtu = AVE_MAX_ETHFRAME - (ETH_HLEN + ETH_FCS_LEN);
 
-	ret = of_get_mac_address(np, ndev->dev_addr);
+	ret = of_get_ethdev_address(np, ndev);
 	if (ret) {
 		/* if the mac address is invalid, use random mac address */
 		eth_hw_addr_random(ndev);
@@ -1689,8 +1689,7 @@ static int ave_probe(struct platform_device *pdev)
 	/* Register as a NAPI supported driver */
 	netif_napi_add(ndev, &priv->napi_rx, ave_napi_poll_rx,
 		       NAPI_POLL_WEIGHT);
-	netif_tx_napi_add(ndev, &priv->napi_tx, ave_napi_poll_tx,
-			  NAPI_POLL_WEIGHT);
+	netif_napi_add_tx(ndev, &priv->napi_tx, ave_napi_poll_tx);
 
 	platform_set_drvdata(pdev, ndev);
 
@@ -1935,6 +1934,17 @@ static const struct ave_soc_data ave_pxs3_data = {
 	.get_pinmode = ave_pxs3_get_pinmode,
 };
 
+static const struct ave_soc_data ave_nx1_data = {
+	.is_desc_64bit = true,
+	.clock_names = {
+		"ether",
+	},
+	.reset_names = {
+		"ether",
+	},
+	.get_pinmode = ave_pxs3_get_pinmode,
+};
+
 static const struct of_device_id of_ave_match[] = {
 	{
 		.compatible = "socionext,uniphier-pro4-ave4",
@@ -1955,6 +1965,10 @@ static const struct of_device_id of_ave_match[] = {
 	{
 		.compatible = "socionext,uniphier-pxs3-ave4",
 		.data = &ave_pxs3_data,
+	},
+	{
+		.compatible = "socionext,uniphier-nx1-ave4",
+		.data = &ave_nx1_data,
 	},
 	{ /* Sentinel */ }
 };

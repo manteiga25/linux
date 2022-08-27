@@ -102,7 +102,7 @@ struct prestera_sdma {
 	struct net_device napi_dev;
 	u32 map_addr;
 	u64 dma_mask;
-	/* protect SDMA with concurrrent access from multiple CPUs */
+	/* protect SDMA with concurrent access from multiple CPUs */
 	spinlock_t tx_lock;
 };
 
@@ -794,14 +794,7 @@ void prestera_rxtx_switch_fini(struct prestera_switch *sw)
 
 int prestera_rxtx_port_init(struct prestera_port *port)
 {
-	int err;
-
-	err = prestera_hw_rxtx_port_init(port);
-	if (err)
-		return err;
-
 	port->dev->needed_headroom = PRESTERA_DSA_HLEN;
-
 	return 0;
 }
 

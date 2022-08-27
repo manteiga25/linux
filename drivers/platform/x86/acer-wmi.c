@@ -138,7 +138,7 @@ struct event_return_value {
 	u16 reserved1;
 	u8 kbd_dock_state;
 	u8 reserved2;
-} __attribute__((packed));
+} __packed;
 
 /*
  * GUID3 Get Device Status device flags
@@ -172,33 +172,33 @@ struct func_input_params {
 	u8 app_status;          /* Acer Device Status. LM, ePM, RF Button... */
 	u8 app_mask;		/* Bit mask to app_status */
 	u8 reserved;
-} __attribute__((packed));
+} __packed;
 
 struct func_return_value {
 	u8 error_code;          /* Error Code */
 	u8 ec_return_value;     /* EC Return Value */
 	u16 reserved;
-} __attribute__((packed));
+} __packed;
 
 struct wmid3_gds_set_input_param {     /* Set Device Status input parameter */
 	u8 function_num;        /* Function Number */
 	u8 hotkey_number;       /* Hotkey Number */
 	u16 devices;            /* Set Device */
 	u8 volume_value;        /* Volume Value */
-} __attribute__((packed));
+} __packed;
 
 struct wmid3_gds_get_input_param {     /* Get Device Status input parameter */
 	u8 function_num;	/* Function Number */
 	u8 hotkey_number;	/* Hotkey Number */
 	u16 devices;		/* Get Device */
-} __attribute__((packed));
+} __packed;
 
 struct wmid3_gds_return_value {	/* Get Device Status return value*/
 	u8 error_code;		/* Error Code */
 	u8 ec_return_value;	/* EC Return Value */
 	u16 devices;		/* Current Device Status */
 	u32 reserved;
-} __attribute__((packed));
+} __packed;
 
 struct hotkey_function_type_aa {
 	u8 type;
@@ -210,7 +210,7 @@ struct hotkey_function_type_aa {
 	u16 display_func_bitmap;
 	u16 others_func_bitmap;
 	u8 commun_fn_key_number;
-} __attribute__((packed));
+} __packed;
 
 /*
  * Interface capability flags
@@ -1615,12 +1615,7 @@ static int read_brightness(struct backlight_device *bd)
 
 static int update_bl_status(struct backlight_device *bd)
 {
-	int intensity = bd->props.brightness;
-
-	if (bd->props.power != FB_BLANK_UNBLANK)
-		intensity = 0;
-	if (bd->props.fb_blank != FB_BLANK_UNBLANK)
-		intensity = 0;
+	int intensity = backlight_get_brightness(bd);
 
 	set_u32(intensity, ACER_CAP_BRIGHTNESS);
 

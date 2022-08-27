@@ -298,7 +298,10 @@ properties:
 
   vqmmc-supply:
     description:
-      Supply for the bus IO line power
+      Supply for the bus IO line power, such as a level shifter.
+      If the level shifter is controlled by a GPIO line, this shall
+      be modeled as a "regulator-fixed" with a GPIO line for
+      switching the level shifter on/off.
 
   mmc-pwrseq:
     $ref: /schemas/types.yaml#/definitions/phandle
@@ -332,12 +335,6 @@ patternProperties:
               Must contain the SDIO function number of the function this
               subnode describes. A value of 0 denotes the memory SD
               function, values from 1 to 7 denote the SDIO functions.
-
-      broken-hpi:
-        $ref: /schemas/types.yaml#/definitions/flag
-        description:
-          Use this to indicate that the mmc-card has a broken hpi
-          implementation, and that hpi should not be used.
 
     required:
       - reg

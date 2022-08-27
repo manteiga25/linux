@@ -27,6 +27,9 @@
 #include "dcn30_optc.h"
 #include "dc.h"
 #include "dcn_calc_math.h"
+#include "dc_dmub_srv.h"
+
+#include "dml/dcn30/dcn30_fpu.h"
 
 #define REG(reg)\
 	optc1->tg_regs->reg
@@ -73,16 +76,23 @@ void optc3_lock_doublebuffer_enable(struct timing_generator *optc)
 		OTG_H_BLANK_END, &h_blank_end);
 
 	REG_UPDATE_2(OTG_GLOBAL_CONTROL1,
-		MASTER_UPDATE_LOCK_DB_START_Y, v_blank_start,
-		MASTER_UPDATE_LOCK_DB_END_Y, v_blank_end);
+		MASTER_UPDATE_LOCK_DB_START_Y, v_blank_start - 1,
+		MASTER_UPDATE_LOCK_DB_END_Y, v_blank_start);
 	REG_UPDATE_2(OTG_GLOBAL_CONTROL4,
-		DIG_UPDATE_POSITION_X, 20,
-		DIG_UPDATE_POSITION_Y, v_blank_start);
+		DIG_UPDATE_POSITION_X, h_blank_start - 180 - 1,
+		DIG_UPDATE_POSITION_Y, v_blank_start - 1);
+	// there is a DIG_UPDATE_VCOUNT_MODE and it is 0.
+
 	REG_UPDATE_3(OTG_GLOBAL_CONTROL0,
 		MASTER_UPDATE_LOCK_DB_START_X, h_blank_start - 200 - 1,
-		MASTER_UPDATE_LOCK_DB_END_X, h_blank_end,
+		MASTER_UPDATE_LOCK_DB_END_X, h_blank_start - 180,
 		MASTER_UPDATE_LOCK_DB_EN, 1);
 	REG_UPDATE(OTG_GLOBAL_CONTROL2, GLOBAL_UPDATE_LOCK_EN, 1);
+
+	REG_SET_3(OTG_VUPDATE_KEEPOUT, 0,
+		MASTER_UPDATE_LOCK_VUPDATE_KEEPOUT_START_OFFSET, 0,
+		MASTER_UPDATE_LOCK_VUPDATE_KEEPOUT_END_OFFSET, 100,
+		OTG_MASTER_UPDATE_LOCK_VUPDATE_KEEPOUT_EN, 1);
 }
 
 void optc3_lock_doublebuffer_disable(struct timing_generator *optc)
@@ -170,11 +180,8 @@ void optc3_set_dsc_config(struct timing_generator *optc,
 {
 	struct optc *optc1 = DCN10TG_FROM_TG(optc);
 
-	optc2_set_dsc_config(optc, dsc_mode, dsc_bytes_per_pixel,
-		dsc_slice_width);
-
-		REG_UPDATE(OTG_V_SYNC_A_CNTL, OTG_V_SYNC_MODE, 0);
-
+	optc2_set_dsc_config(optc, dsc_mode, dsc_bytes_per_pixel, dsc_slice_width);
+	REG_UPDATE(OTG_V_SYNC_A_CNTL, OTG_V_SYNC_MODE, 0);
 }
 
 void optc3_set_odm_bypass(struct timing_generator *optc,
@@ -275,6 +282,11 @@ static void optc3_set_timing_double_buffer(struct timing_generator *optc, bool e
 		   OTG_DRR_TIMING_DBUF_UPDATE_MODE, mode);
 }
 
+void optc3_set_vtotal_min_max(struct timing_generator *optc, int vtotal_min, int vtotal_max)
+{
+	optc1_set_vtotal_min_max(optc, vtotal_min, vtotal_max);
+}
+
 void optc3_tg_init(struct timing_generator *optc)
 {
 	optc3_set_timing_double_buffer(optc, true);
@@ -325,6 +337,7 @@ static struct timing_generator_funcs dcn30_tg_funcs = {
 		.get_crc = optc1_get_crc,
 		.configure_crc = optc2_configure_crc,
 		.set_dsc_config = optc3_set_dsc_config,
+		.get_dsc_status = optc2_get_dsc_status,
 		.set_dwb_source = NULL,
 		.set_odm_bypass = optc3_set_odm_bypass,
 		.set_odm_combine = optc3_set_odm_combine,

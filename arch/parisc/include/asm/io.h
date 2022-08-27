@@ -7,8 +7,6 @@
 
 #define virt_to_phys(a) ((unsigned long)__pa(a))
 #define phys_to_virt(a) __va(a)
-#define virt_to_bus virt_to_phys
-#define bus_to_virt phys_to_virt
 
 static inline unsigned long isa_bus_to_virt(unsigned long addr) {
 	BUG();
@@ -273,9 +271,9 @@ static inline int inl(unsigned long addr)
 	return -1;
 }
 
-#define outb(x, y)	BUG()
-#define outw(x, y)	BUG()
-#define outl(x, y)	BUG()
+#define outb(x, y)	({(void)(x); (void)(y); BUG(); 0;})
+#define outw(x, y)	({(void)(x); (void)(y); BUG(); 0;})
+#define outl(x, y)	({(void)(x); (void)(y); BUG(); 0;})
 #endif
 
 /*

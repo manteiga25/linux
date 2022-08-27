@@ -430,7 +430,7 @@ static struct srp_fr_pool *srp_create_fr_pool(struct ib_device *device,
 	spin_lock_init(&pool->lock);
 	INIT_LIST_HEAD(&pool->free_list);
 
-	if (device->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG)
+	if (device->attrs.kernel_cap_flags & IBK_SG_GAPS_REG)
 		mr_type = IB_MR_TYPE_SG_GAPS;
 	else
 		mr_type = IB_MR_TYPE_MEM_REG;
@@ -1026,10 +1026,17 @@ out:
  */
 static void srp_del_scsi_host_attr(struct Scsi_Host *shost)
 {
-	struct device_attribute **attr;
+	const struct attribute_group **g;
+	struct attribute **attr;
 
-	for (attr = shost->hostt->shost_attrs; attr && *attr; ++attr)
-		device_remove_file(&shost->shost_dev, *attr);
+	for (g = shost->hostt->shost_groups; *g; ++g) {
+		for (attr = (*g)->attrs; *attr; ++attr) {
+			struct device_attribute *dev_attr =
+				container_of(*attr, typeof(*dev_attr), attr);
+
+			device_remove_file(&shost->shost_dev, dev_attr);
+		}
+	}
 }
 
 static void srp_remove_target(struct srp_target_port *target)
@@ -1266,7 +1273,7 @@ static void srp_finish_req(struct srp_rdma_ch *ch, struct srp_request *req,
 	if (scmnd) {
 		srp_free_req(ch, req, scmnd, 0);
 		scmnd->result = result;
-		scmnd->scsi_done(scmnd);
+		scsi_done(scmnd);
 	}
 }
 
@@ -1275,8 +1282,7 @@ struct srp_terminate_context {
 	int scsi_result;
 };
 
-static bool srp_terminate_cmd(struct scsi_cmnd *scmnd, void *context_ptr,
-			      bool reserved)
+static bool srp_terminate_cmd(struct scsi_cmnd *scmnd, void *context_ptr)
 {
 	struct srp_terminate_context *context = context_ptr;
 	struct srp_target_port *target = context->srp_target;
@@ -1987,7 +1993,7 @@ static void srp_process_rsp(struct srp_rdma_ch *ch, struct srp_rsp *rsp)
 		srp_free_req(ch, req, scmnd,
 			     be32_to_cpu(rsp->req_lim_delta));
 
-		scmnd->scsi_done(scmnd);
+		scsi_done(scmnd);
 	}
 }
 
@@ -2239,7 +2245,7 @@ err_iu:
 
 err:
 	if (scmnd->result) {
-		scmnd->scsi_done(scmnd);
+		scsi_done(scmnd);
 		ret = 0;
 	} else {
 		ret = SCSI_MLQUEUE_HOST_BUSY;
@@ -2811,7 +2817,7 @@ static int srp_abort(struct scsi_cmnd *scmnd)
 	if (ret == SUCCESS) {
 		srp_free_req(ch, req, scmnd, 0);
 		scmnd->result = DID_ABORT << 16;
-		scmnd->scsi_done(scmnd);
+		scsi_done(scmnd);
 	}
 
 	return ret;
@@ -3050,25 +3056,27 @@ static ssize_t allow_ext_sg_show(struct device *dev,
 
 static DEVICE_ATTR_RO(allow_ext_sg);
 
-static struct device_attribute *srp_host_attrs[] = {
-	&dev_attr_id_ext,
-	&dev_attr_ioc_guid,
-	&dev_attr_service_id,
-	&dev_attr_pkey,
-	&dev_attr_sgid,
-	&dev_attr_dgid,
-	&dev_attr_orig_dgid,
-	&dev_attr_req_lim,
-	&dev_attr_zero_req_lim,
-	&dev_attr_local_ib_port,
-	&dev_attr_local_ib_device,
-	&dev_attr_ch_count,
-	&dev_attr_comp_vector,
-	&dev_attr_tl_retry_count,
-	&dev_attr_cmd_sg_entries,
-	&dev_attr_allow_ext_sg,
+static struct attribute *srp_host_attrs[] = {
+	&dev_attr_id_ext.attr,
+	&dev_attr_ioc_guid.attr,
+	&dev_attr_service_id.attr,
+	&dev_attr_pkey.attr,
+	&dev_attr_sgid.attr,
+	&dev_attr_dgid.attr,
+	&dev_attr_orig_dgid.attr,
+	&dev_attr_req_lim.attr,
+	&dev_attr_zero_req_lim.attr,
+	&dev_attr_local_ib_port.attr,
+	&dev_attr_local_ib_device.attr,
+	&dev_attr_ch_count.attr,
+	&dev_attr_comp_vector.attr,
+	&dev_attr_tl_retry_count.attr,
+	&dev_attr_cmd_sg_entries.attr,
+	&dev_attr_allow_ext_sg.attr,
 	NULL
 };
+
+ATTRIBUTE_GROUPS(srp_host);
 
 static struct scsi_host_template srp_template = {
 	.module				= THIS_MODULE,
@@ -3090,7 +3098,7 @@ static struct scsi_host_template srp_template = {
 	.can_queue			= SRP_DEFAULT_CMD_SQ_SIZE,
 	.this_id			= -1,
 	.cmd_per_lun			= SRP_DEFAULT_CMD_SQ_SIZE,
-	.shost_attrs			= srp_host_attrs,
+	.shost_groups			= srp_host_groups,
 	.track_queue_depth		= 1,
 	.cmd_size			= sizeof(struct srp_request),
 };
@@ -3641,7 +3649,7 @@ static ssize_t add_target_store(struct device *dev,
 	target_host->max_cmd_len = sizeof ((struct srp_cmd *) (void *) 0L)->cdb;
 	target_host->max_segment_size = ib_dma_max_seg_size(ibdev);
 
-	if (!(ibdev->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG))
+	if (!(ibdev->attrs.kernel_cap_flags & IBK_SG_GAPS_REG))
 		target_host->virt_boundary_mask = ~srp_dev->mr_page_mask;
 
 	target = host_to_target(target_host);
@@ -3697,8 +3705,8 @@ static ssize_t add_target_store(struct device *dev,
 	}
 
 	if (srp_dev->use_fast_reg) {
-		bool gaps_reg = (ibdev->attrs.device_cap_flags &
-				 IB_DEVICE_SG_GAPS_REG);
+		bool gaps_reg = ibdev->attrs.kernel_cap_flags &
+				 IBK_SG_GAPS_REG;
 
 		max_sectors_per_mr = srp_dev->max_pages_per_mr <<
 				  (ilog2(srp_dev->mr_page_size) - 9);
@@ -4038,9 +4046,11 @@ static void srp_remove_one(struct ib_device *device, void *client_data)
 		spin_unlock(&host->target_lock);
 
 		/*
-		 * Wait for tl_err and target port removal tasks.
+		 * srp_queue_remove_work() queues a call to
+		 * srp_remove_target(). The latter function cancels
+		 * target->tl_err_work so waiting for the remove works to
+		 * finish is sufficient.
 		 */
-		flush_workqueue(system_long_wq);
 		flush_workqueue(srp_remove_wq);
 
 		kfree(host);
