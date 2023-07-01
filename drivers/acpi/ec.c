@@ -1267,7 +1267,7 @@ static void acpi_ec_event_handler(struct work_struct *work)
 	spin_unlock_irq(&ec->lock);
 }
 
-static void clear_gpe_and_advance_transaction(struct acpi_ec *ec, bool interrupt)
+static void clear_gpe_and_advance_transaction(struct acpi_ec *ec, const bool interrupt)
 {
 	/*
 	 * Clear GPE_STS upfront to allow subsequent hardware GPE_STS 0->1
@@ -1284,7 +1284,7 @@ static void clear_gpe_and_advance_transaction(struct acpi_ec *ec, bool interrupt
 	if (ec->gpe >= 0 && acpi_ec_gpe_status_set(ec))
 		acpi_clear_gpe(NULL, ec->gpe);
 
-	advance_transaction(ec, true);
+	advance_transaction(ec, interrupt);
 }
 
 static void acpi_ec_handle_interrupt(struct acpi_ec *ec)
