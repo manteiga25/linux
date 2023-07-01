@@ -14,7 +14,7 @@
 #include <linux/net.h>
 #include <linux/tracepoint.h>
 
-#include <trace/events/sunrpc_base.h>
+#include <trace/misc/sunrpc.h>
 
 TRACE_DEFINE_ENUM(SOCK_STREAM);
 TRACE_DEFINE_ENUM(SOCK_DGRAM);
@@ -1666,10 +1666,12 @@ TRACE_DEFINE_ENUM(SVC_COMPLETE);
 #define SVC_RQST_ENDPOINT_VARARGS \
 		__entry->xid, __get_sockaddr(server), __get_sockaddr(client)
 
-TRACE_EVENT(svc_authenticate,
+TRACE_EVENT_CONDITION(svc_authenticate,
 	TP_PROTO(const struct svc_rqst *rqst, int auth_res),
 
 	TP_ARGS(rqst, auth_res),
+
+	TP_CONDITION(auth_res != SVC_OK && auth_res != SVC_COMPLETE),
 
 	TP_STRUCT__entry(
 		SVC_RQST_ENDPOINT_FIELDS(rqst)
@@ -1788,6 +1790,31 @@ DEFINE_EVENT(svc_rqst_status, svc_send,
 	TP_PROTO(const struct svc_rqst *rqst, int status),
 	TP_ARGS(rqst, status));
 
+TRACE_EVENT(svc_replace_page_err,
+	TP_PROTO(const struct svc_rqst *rqst),
+
+	TP_ARGS(rqst),
+	TP_STRUCT__entry(
+		SVC_RQST_ENDPOINT_FIELDS(rqst)
+
+		__field(const void *, begin)
+		__field(const void *, respages)
+		__field(const void *, nextpage)
+	),
+
+	TP_fast_assign(
+		SVC_RQST_ENDPOINT_ASSIGNMENTS(rqst);
+
+		__entry->begin = rqst->rq_pages;
+		__entry->respages = rqst->rq_respages;
+		__entry->nextpage = rqst->rq_next_page;
+	),
+
+	TP_printk(SVC_RQST_ENDPOINT_FORMAT " begin=%p respages=%p nextpage=%p",
+		SVC_RQST_ENDPOINT_VARARGS,
+		__entry->begin, __entry->respages, __entry->nextpage)
+);
+
 TRACE_EVENT(svc_stats_latency,
 	TP_PROTO(
 		const struct svc_rqst *rqst
@@ -1817,20 +1844,23 @@ TRACE_EVENT(svc_stats_latency,
 
 #define show_svc_xprt_flags(flags)					\
 	__print_flags(flags, "|",					\
-		{ (1UL << XPT_BUSY),		"XPT_BUSY"},		\
-		{ (1UL << XPT_CONN),		"XPT_CONN"},		\
-		{ (1UL << XPT_CLOSE),		"XPT_CLOSE"},		\
-		{ (1UL << XPT_DATA),		"XPT_DATA"},		\
-		{ (1UL << XPT_TEMP),		"XPT_TEMP"},		\
-		{ (1UL << XPT_DEAD),		"XPT_DEAD"},		\
-		{ (1UL << XPT_CHNGBUF),		"XPT_CHNGBUF"},		\
-		{ (1UL << XPT_DEFERRED),	"XPT_DEFERRED"},	\
-		{ (1UL << XPT_OLD),		"XPT_OLD"},		\
-		{ (1UL << XPT_LISTENER),	"XPT_LISTENER"},	\
-		{ (1UL << XPT_CACHE_AUTH),	"XPT_CACHE_AUTH"},	\
-		{ (1UL << XPT_LOCAL),		"XPT_LOCAL"},		\
-		{ (1UL << XPT_KILL_TEMP),	"XPT_KILL_TEMP"},	\
-		{ (1UL << XPT_CONG_CTRL),	"XPT_CONG_CTRL"})
+		{ BIT(XPT_BUSY),		"BUSY" },		\
+		{ BIT(XPT_CONN),		"CONN" },		\
+		{ BIT(XPT_CLOSE),		"CLOSE" },		\
+		{ BIT(XPT_DATA),		"DATA" },		\
+		{ BIT(XPT_TEMP),		"TEMP" },		\
+		{ BIT(XPT_DEAD),		"DEAD" },		\
+		{ BIT(XPT_CHNGBUF),		"CHNGBUF" },		\
+		{ BIT(XPT_DEFERRED),		"DEFERRED" },		\
+		{ BIT(XPT_OLD),			"OLD" },		\
+		{ BIT(XPT_LISTENER),		"LISTENER" },		\
+		{ BIT(XPT_CACHE_AUTH),		"CACHE_AUTH" },		\
+		{ BIT(XPT_LOCAL),		"LOCAL" },		\
+		{ BIT(XPT_KILL_TEMP),		"KILL_TEMP" },		\
+		{ BIT(XPT_CONG_CTRL),		"CONG_CTRL" },		\
+		{ BIT(XPT_HANDSHAKE),		"HANDSHAKE" },		\
+		{ BIT(XPT_TLS_SESSION),		"TLS_SESSION" },	\
+		{ BIT(XPT_PEER_AUTH),		"PEER_AUTH" })
 
 TRACE_EVENT(svc_xprt_create_err,
 	TP_PROTO(
@@ -1963,6 +1993,17 @@ DEFINE_SVC_XPRT_EVENT(close);
 DEFINE_SVC_XPRT_EVENT(detach);
 DEFINE_SVC_XPRT_EVENT(free);
 
+#define DEFINE_SVC_TLS_EVENT(name) \
+	DEFINE_EVENT(svc_xprt_event, svc_tls_##name, \
+		TP_PROTO(const struct svc_xprt *xprt), \
+		TP_ARGS(xprt))
+
+DEFINE_SVC_TLS_EVENT(start);
+DEFINE_SVC_TLS_EVENT(upcall);
+DEFINE_SVC_TLS_EVENT(unavailable);
+DEFINE_SVC_TLS_EVENT(not_started);
+DEFINE_SVC_TLS_EVENT(timed_out);
+
 TRACE_EVENT(svc_xprt_accept,
 	TP_PROTO(
 		const struct svc_xprt *xprt,
@@ -2063,31 +2104,46 @@ DEFINE_SVC_DEFERRED_EVENT(drop);
 DEFINE_SVC_DEFERRED_EVENT(queue);
 DEFINE_SVC_DEFERRED_EVENT(recv);
 
-TRACE_EVENT(svcsock_new_socket,
+DECLARE_EVENT_CLASS(svcsock_lifetime_class,
 	TP_PROTO(
+		const void *svsk,
 		const struct socket *socket
 	),
-
-	TP_ARGS(socket),
-
+	TP_ARGS(svsk, socket),
 	TP_STRUCT__entry(
+		__field(unsigned int, netns_ino)
+		__field(const void *, svsk)
+		__field(const void *, sk)
 		__field(unsigned long, type)
 		__field(unsigned long, family)
-		__field(bool, listener)
+		__field(unsigned long, state)
 	),
-
 	TP_fast_assign(
-		__entry->type = socket->type;
-		__entry->family = socket->sk->sk_family;
-		__entry->listener = (socket->sk->sk_state == TCP_LISTEN);
-	),
+		struct sock *sk = socket->sk;
 
-	TP_printk("type=%s family=%s%s",
-		show_socket_type(__entry->type),
+		__entry->netns_ino = sock_net(sk)->ns.inum;
+		__entry->svsk = svsk;
+		__entry->sk = sk;
+		__entry->type = socket->type;
+		__entry->family = sk->sk_family;
+		__entry->state = sk->sk_state;
+	),
+	TP_printk("svsk=%p type=%s family=%s%s",
+		__entry->svsk, show_socket_type(__entry->type),
 		rpc_show_address_family(__entry->family),
-		__entry->listener ? " (listener)" : ""
+		__entry->state == TCP_LISTEN ? " (listener)" : ""
 	)
 );
+#define DEFINE_SVCSOCK_LIFETIME_EVENT(name) \
+	DEFINE_EVENT(svcsock_lifetime_class, name, \
+		TP_PROTO( \
+			const void *svsk, \
+			const struct socket *socket \
+		), \
+		TP_ARGS(svsk, socket))
+
+DEFINE_SVCSOCK_LIFETIME_EVENT(svcsock_new);
+DEFINE_SVCSOCK_LIFETIME_EVENT(svcsock_free);
 
 TRACE_EVENT(svcsock_marker,
 	TP_PROTO(

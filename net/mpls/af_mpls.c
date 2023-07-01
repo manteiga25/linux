@@ -12,6 +12,7 @@
 #include <linux/nospec.h>
 #include <linux/vmalloc.h>
 #include <linux/percpu.h>
+#include <net/gso.h>
 #include <net/ip.h>
 #include <net/dst.h>
 #include <net/sock.h>
@@ -1428,6 +1429,7 @@ static int mpls_dev_sysctl_register(struct net_device *dev,
 free:
 	kfree(table);
 out:
+	mdev->sysctl = NULL;
 	return -ENOBUFS;
 }
 
@@ -1436,6 +1438,9 @@ static void mpls_dev_sysctl_unregister(struct net_device *dev,
 {
 	struct net *net = dev_net(dev);
 	struct ctl_table *table;
+
+	if (!mdev->sysctl)
+		return;
 
 	table = mdev->sysctl->ctl_table_arg;
 	unregister_net_sysctl_table(mdev->sysctl);

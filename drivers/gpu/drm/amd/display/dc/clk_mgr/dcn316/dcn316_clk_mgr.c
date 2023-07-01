@@ -39,7 +39,7 @@
 #include "dcn316_smu.h"
 #include "dm_helpers.h"
 #include "dc_dmub_srv.h"
-#include "dc_link_dp.h"
+#include "link.h"
 
 // DCN316 this is CLK1 instance
 #define MAX_INSTANCE                                        7
@@ -112,7 +112,7 @@ static int dcn316_get_active_display_cnt_wa(
 	return display_count;
 }
 
-static void dcn316_disable_otg_wa(struct clk_mgr *clk_mgr_base, bool disable)
+static void dcn316_disable_otg_wa(struct clk_mgr *clk_mgr_base, struct dc_state *context, bool disable)
 {
 	struct dc *dc = clk_mgr_base->ctx->dc;
 	int i;
@@ -124,9 +124,10 @@ static void dcn316_disable_otg_wa(struct clk_mgr *clk_mgr_base, bool disable)
 			continue;
 		if (pipe->stream && (pipe->stream->dpms_off || pipe->plane_state == NULL ||
 				     dc_is_virtual_signal(pipe->stream->signal))) {
-			if (disable)
+			if (disable) {
 				pipe->stream_res.tg->funcs->immediate_disable_crtc(pipe->stream_res.tg);
-			else
+				reset_sync_context_for_pipe(dc, context, i);
+			} else
 				pipe->stream_res.tg->funcs->enable_crtc(pipe->stream_res.tg);
 		}
 	}
@@ -206,12 +207,10 @@ static void dcn316_update_clocks(struct clk_mgr *clk_mgr_base,
 	}
 
 	// workaround: Limit dppclk to 100Mhz to avoid lower eDP panel switch to plus 4K monitor underflow.
-	if (!IS_DIAG_DC(dc->ctx->dce_environment)) {
-		if (new_clocks->dppclk_khz < 100000)
-			new_clocks->dppclk_khz = 100000;
-		if (new_clocks->dispclk_khz < 100000)
-			new_clocks->dispclk_khz = 100000;
-	}
+	if (new_clocks->dppclk_khz < 100000)
+		new_clocks->dppclk_khz = 100000;
+	if (new_clocks->dispclk_khz < 100000)
+		new_clocks->dispclk_khz = 100000;
 
 	if (should_set_clock(safe_to_lower, new_clocks->dppclk_khz, clk_mgr->base.clks.dppclk_khz)) {
 		if (clk_mgr->base.clks.dppclk_khz > new_clocks->dppclk_khz)
@@ -221,11 +220,11 @@ static void dcn316_update_clocks(struct clk_mgr *clk_mgr_base,
 	}
 
 	if (should_set_clock(safe_to_lower, new_clocks->dispclk_khz, clk_mgr_base->clks.dispclk_khz)) {
-		dcn316_disable_otg_wa(clk_mgr_base, true);
+		dcn316_disable_otg_wa(clk_mgr_base, context, true);
 
 		clk_mgr_base->clks.dispclk_khz = new_clocks->dispclk_khz;
 		dcn316_smu_set_dispclk(clk_mgr, clk_mgr_base->clks.dispclk_khz);
-		dcn316_disable_otg_wa(clk_mgr_base, false);
+		dcn316_disable_otg_wa(clk_mgr_base, context, false);
 
 		update_dispclk = true;
 	}
@@ -253,9 +252,7 @@ static void dcn316_update_clocks(struct clk_mgr *clk_mgr_base,
 	cmd.notify_clocks.clocks.dispclk_khz = clk_mgr_base->clks.dispclk_khz;
 	cmd.notify_clocks.clocks.dppclk_khz = clk_mgr_base->clks.dppclk_khz;
 
-	dc_dmub_srv_cmd_queue(dc->ctx->dmub_srv, &cmd);
-	dc_dmub_srv_cmd_execute(dc->ctx->dmub_srv);
-	dc_dmub_srv_wait_idle(dc->ctx->dmub_srv);
+	dm_execute_dmub_cmd(dc->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
 }
 
 static void dcn316_dump_clk_registers(struct clk_state_registers_and_bypass *regs_and_bypass,
@@ -552,6 +549,7 @@ static void dcn316_clk_mgr_helper_populate_bw_params(
 
 	bw_params->vram_type = bios_info->memory_type;
 	bw_params->num_channels = bios_info->ma_channel_number;
+	bw_params->dram_channel_width_bytes = bios_info->memory_type == 0x22 ? 8 : 4;
 
 	for (i = 0; i < WM_SET_COUNT; i++) {
 		bw_params->wm_table.entries[i].wm_inst = i;
@@ -616,6 +614,7 @@ void dcn316_clk_mgr_construct(
 		struct dccg *dccg)
 {
 	struct dcn316_smu_dpm_clks smu_dpm_clks = { 0 };
+	struct clk_log_info log_info = {0};
 
 	clk_mgr->base.base.ctx = ctx;
 	clk_mgr->base.base.funcs = &dcn316_funcs;
@@ -655,35 +654,27 @@ void dcn316_clk_mgr_construct(
 
 	ASSERT(smu_dpm_clks.dpm_clks);
 
-	if (IS_FPGA_MAXIMUS_DC(ctx->dce_environment)) {
-		clk_mgr->base.base.funcs = &dcn3_fpga_funcs;
-		clk_mgr->base.base.dentist_vco_freq_khz = 2500000;
+	clk_mgr->base.smu_ver = dcn316_smu_get_smu_version(&clk_mgr->base);
+
+	if (clk_mgr->base.smu_ver > 0)
+		clk_mgr->base.smu_present = true;
+
+	// Skip this for now as it did not work on DCN315, renable during bring up
+	clk_mgr->base.base.dentist_vco_freq_khz = get_vco_frequency_from_reg(&clk_mgr->base);
+
+	/* in case we don't get a value from the register, use default */
+	if (clk_mgr->base.base.dentist_vco_freq_khz == 0)
+		clk_mgr->base.base.dentist_vco_freq_khz = 2500000; /* 2400MHz */
+
+
+	if (ctx->dc_bios->integrated_info->memory_type == LpDdr5MemType) {
+		dcn316_bw_params.wm_table = lpddr5_wm_table;
 	} else {
-		struct clk_log_info log_info = {0};
-
-		clk_mgr->base.smu_ver = dcn316_smu_get_smu_version(&clk_mgr->base);
-
-		if (clk_mgr->base.smu_ver > 0)
-			clk_mgr->base.smu_present = true;
-
-		// Skip this for now as it did not work on DCN315, renable during bring up
-		clk_mgr->base.base.dentist_vco_freq_khz = get_vco_frequency_from_reg(&clk_mgr->base);
-
-		/* in case we don't get a value from the register, use default */
-		if (clk_mgr->base.base.dentist_vco_freq_khz == 0)
-			clk_mgr->base.base.dentist_vco_freq_khz = 2500000; /* 2400MHz */
-
-
-		if (ctx->dc_bios->integrated_info->memory_type == LpDdr5MemType) {
-			dcn316_bw_params.wm_table = lpddr5_wm_table;
-		} else {
-			dcn316_bw_params.wm_table = ddr4_wm_table;
-		}
-		/* Saved clocks configured at boot for debug purposes */
-		dcn316_dump_clk_registers(&clk_mgr->base.base.boot_snapshot,
-					  &clk_mgr->base.base, &log_info);
-
+		dcn316_bw_params.wm_table = ddr4_wm_table;
 	}
+	/* Saved clocks configured at boot for debug purposes */
+	dcn316_dump_clk_registers(&clk_mgr->base.base.boot_snapshot,
+				  &clk_mgr->base.base, &log_info);
 
 	clk_mgr->base.base.dprefclk_khz = 600000;
 	clk_mgr->base.base.dprefclk_khz = dcn316_smu_get_dpref_clk(&clk_mgr->base);

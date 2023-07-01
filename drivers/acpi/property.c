@@ -304,8 +304,10 @@ static void acpi_init_of_compatible(struct acpi_device *adev)
 		ret = acpi_dev_get_property(adev, "compatible",
 					    ACPI_TYPE_STRING, &of_compatible);
 		if (ret) {
-			if (adev->parent
-			    && adev->parent->flags.of_compatible_ok)
+			struct acpi_device *parent;
+
+			parent = acpi_dev_parent(adev);
+			if (parent && parent->flags.of_compatible_ok)
 				goto out;
 
 			return;
@@ -370,7 +372,7 @@ static bool acpi_tie_nondev_subnodes(struct acpi_device_data *data)
 		bool ret;
 
 		status = acpi_attach_data(dn->handle, acpi_nondev_subnode_tag, dn);
-		if (ACPI_FAILURE(status)) {
+		if (ACPI_FAILURE(status) && status != AE_ALREADY_EXISTS) {
 			acpi_handle_err(dn->handle, "Can't tag data node\n");
 			return false;
 		}
@@ -969,60 +971,48 @@ static int acpi_data_prop_read_single(const struct acpi_device_data *data,
 				      enum dev_prop_type proptype, void *val)
 {
 	const union acpi_object *obj;
-	int ret;
+	int ret = 0;
 
-	if (proptype >= DEV_PROP_U8 && proptype <= DEV_PROP_U64) {
+	if (proptype >= DEV_PROP_U8 && proptype <= DEV_PROP_U64)
 		ret = acpi_data_get_property(data, propname, ACPI_TYPE_INTEGER, &obj);
-		if (ret)
-			return ret;
-
-		switch (proptype) {
-		case DEV_PROP_U8:
-			if (obj->integer.value > U8_MAX)
-				return -EOVERFLOW;
-
-			if (val)
-				*(u8 *)val = obj->integer.value;
-
-			break;
-		case DEV_PROP_U16:
-			if (obj->integer.value > U16_MAX)
-				return -EOVERFLOW;
-
-			if (val)
-				*(u16 *)val = obj->integer.value;
-
-			break;
-		case DEV_PROP_U32:
-			if (obj->integer.value > U32_MAX)
-				return -EOVERFLOW;
-
-			if (val)
-				*(u32 *)val = obj->integer.value;
-
-			break;
-		default:
-			if (val)
-				*(u64 *)val = obj->integer.value;
-
-			break;
-		}
-
-		if (!val)
-			return 1;
-	} else if (proptype == DEV_PROP_STRING) {
+	else if (proptype == DEV_PROP_STRING)
 		ret = acpi_data_get_property(data, propname, ACPI_TYPE_STRING, &obj);
-		if (ret)
-			return ret;
+	if (ret)
+		return ret;
 
+	switch (proptype) {
+	case DEV_PROP_U8:
+		if (obj->integer.value > U8_MAX)
+			return -EOVERFLOW;
+		if (val)
+			*(u8 *)val = obj->integer.value;
+		break;
+	case DEV_PROP_U16:
+		if (obj->integer.value > U16_MAX)
+			return -EOVERFLOW;
+		if (val)
+			*(u16 *)val = obj->integer.value;
+		break;
+	case DEV_PROP_U32:
+		if (obj->integer.value > U32_MAX)
+			return -EOVERFLOW;
+		if (val)
+			*(u32 *)val = obj->integer.value;
+		break;
+	case DEV_PROP_U64:
+		if (val)
+			*(u64 *)val = obj->integer.value;
+		break;
+	case DEV_PROP_STRING:
 		if (val)
 			*(char **)val = obj->string.pointer;
-
 		return 1;
-	} else {
-		ret = -EINVAL;
+	default:
+		return -EINVAL;
 	}
-	return ret;
+
+	/* When no storage provided return number of available values */
+	return val ? 0 : 1;
 }
 
 #define acpi_copy_property_array_uint(items, val, nval)			\
@@ -1043,11 +1033,10 @@ static int acpi_data_prop_read_single(const struct acpi_device_data *data,
 				break;					\
 			}						\
 			if (__items[i].integer.value > _Generic(__val,	\
-								u8: U8_MAX, \
-								u16: U16_MAX, \
-								u32: U32_MAX, \
-								u64: U64_MAX, \
-								default: 0U)) { \
+								u8 *: U8_MAX, \
+								u16 *: U16_MAX, \
+								u32 *: U32_MAX, \
+								u64 *: U64_MAX)) { \
 				ret = -EOVERFLOW;			\
 				break;					\
 			}						\
@@ -1268,10 +1257,11 @@ acpi_node_get_parent(const struct fwnode_handle *fwnode)
 		return to_acpi_data_node(fwnode)->parent;
 	}
 	if (is_acpi_device_node(fwnode)) {
-		struct device *dev = to_acpi_device_node(fwnode)->dev.parent;
+		struct acpi_device *parent;
 
-		if (dev)
-			return acpi_fwnode_handle(to_acpi_device(dev));
+		parent = acpi_dev_parent(to_acpi_device_node(fwnode));
+		if (parent)
+			return acpi_fwnode_handle(parent);
 	}
 
 	return NULL;

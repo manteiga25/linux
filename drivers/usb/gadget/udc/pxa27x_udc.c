@@ -215,7 +215,7 @@ static void pxa_init_debugfs(struct pxa_udc *udc)
 
 static void pxa_cleanup_debugfs(struct pxa_udc *udc)
 {
-	debugfs_remove(debugfs_lookup(udc->gadget.name, usb_debug_root));
+	debugfs_lookup_and_remove(udc->gadget.name, usb_debug_root);
 }
 
 #else
@@ -2471,12 +2471,6 @@ static void pxa_udc_shutdown(struct platform_device *_dev)
 	if (udc_readl(udc, UDCCR) & UDCCR_UDE)
 		udc_disable(udc);
 }
-
-#ifdef CONFIG_PXA27x
-extern void pxa27x_clear_otgph(void);
-#else
-#define pxa27x_clear_otgph()   do {} while (0)
-#endif
 
 #ifdef CONFIG_PM
 /**

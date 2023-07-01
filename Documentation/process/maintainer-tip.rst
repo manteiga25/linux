@@ -128,8 +128,8 @@ uppercase letter and should be written in imperative tone.
 Changelog
 ^^^^^^^^^
 
-The general rules about changelogs in the process documentation, see
-:ref:`Documentation/process/ <submittingpatches>`, apply.
+The general rules about changelogs in the :ref:`Submitting patches guide
+<describe_changes>`, apply.
 
 The tip tree maintainers set value on following these rules, especially on
 the request to write changelogs in imperative mood and not impersonating
@@ -420,6 +420,9 @@ allowing themselves a breath. Please respect that.
 
 The release candidate -rc1 is the starting point for new patches to be
 applied which are targeted for the next merge window.
+
+So called _urgent_ branches will be merged into mainline during the
+stabilization phase of each release.
 
 
 Git

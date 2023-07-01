@@ -110,7 +110,7 @@ static unsigned int adda_dl_rate_transform(struct mtk_base_afe *afe,
 	case 192000:
 		return MTK_AFE_ADDA_DL_RATE_192K;
 	default:
-		dev_info(afe->dev, "%s(), rate %d invalid, use 48kHz!!!\n",
+		dev_dbg(afe->dev, "%s(), rate %d invalid, use 48kHz!!!\n",
 			 __func__, rate);
 	}
 
@@ -134,7 +134,7 @@ static unsigned int adda_ul_rate_transform(struct mtk_base_afe *afe,
 	case 192000:
 		return MTK_AFE_ADDA_UL_RATE_192K;
 	default:
-		dev_info(afe->dev, "%s(), rate %d invalid, use 48kHz!!!\n",
+		dev_dbg(afe->dev, "%s(), rate %d invalid, use 48kHz!!!\n",
 			 __func__, rate);
 	}
 
@@ -271,9 +271,6 @@ static int mtk_adda_ul_event(struct snd_soc_dapm_widget *w,
 		/* should delayed 1/fs(smallest is 8k) = 125us before afe off */
 		usleep_range(125, 135);
 		mt8186_afe_gpio_request(afe->dev, false, MT8186_DAI_ADDA, 1);
-
-		/* reset dmic */
-		afe_priv->mtkaif_dmic = 0;
 		break;
 	default:
 		break;

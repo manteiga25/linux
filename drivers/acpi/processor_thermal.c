@@ -140,9 +140,13 @@ void acpi_thermal_cpufreq_init(struct cpufreq_policy *policy)
 		ret = freq_qos_add_request(&policy->constraints,
 					   &pr->thermal_req,
 					   FREQ_QOS_MAX, INT_MAX);
-		if (ret < 0)
+		if (ret < 0) {
 			pr_err("Failed to add freq constraint for CPU%d (%d)\n",
 			       cpu, ret);
+			continue;
+		}
+
+		thermal_cooling_device_update(pr->cdev);
 	}
 }
 
@@ -151,10 +155,14 @@ void acpi_thermal_cpufreq_exit(struct cpufreq_policy *policy)
 	unsigned int cpu;
 
 	for_each_cpu(cpu, policy->related_cpus) {
-		struct acpi_processor *pr = per_cpu(processors, policy->cpu);
+		struct acpi_processor *pr = per_cpu(processors, cpu);
 
-		if (pr)
-			freq_qos_remove_request(&pr->thermal_req);
+		if (!pr)
+			continue;
+
+		freq_qos_remove_request(&pr->thermal_req);
+
+		thermal_cooling_device_update(pr->cdev);
 	}
 }
 #else				/* ! CONFIG_CPU_FREQ */

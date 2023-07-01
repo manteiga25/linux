@@ -2,6 +2,7 @@
 #ifndef _LINUX_DMA_MAPPING_H
 #define _LINUX_DMA_MAPPING_H
 
+#include <linux/cache.h>
 #include <linux/sizes.h>
 #include <linux/string.h>
 #include <linux/device.h>
@@ -139,7 +140,6 @@ int dma_mmap_attrs(struct device *dev, struct vm_area_struct *vma,
 		void *cpu_addr, dma_addr_t dma_addr, size_t size,
 		unsigned long attrs);
 bool dma_can_mmap(struct device *dev);
-int dma_supported(struct device *dev, u64 mask);
 bool dma_pci_p2pdma_supported(struct device *dev);
 int dma_set_mask(struct device *dev, u64 mask);
 int dma_set_coherent_mask(struct device *dev, u64 mask);
@@ -247,10 +247,6 @@ static inline int dma_mmap_attrs(struct device *dev, struct vm_area_struct *vma,
 static inline bool dma_can_mmap(struct device *dev)
 {
 	return false;
-}
-static inline int dma_supported(struct device *dev, u64 mask)
-{
-	return 0;
 }
 static inline bool dma_pci_p2pdma_supported(struct device *dev)
 {
@@ -548,13 +544,15 @@ static inline int dma_set_min_align_mask(struct device *dev,
 	return 0;
 }
 
+#ifndef dma_get_cache_alignment
 static inline int dma_get_cache_alignment(void)
 {
-#ifdef ARCH_DMA_MINALIGN
+#ifdef ARCH_HAS_DMA_MINALIGN
 	return ARCH_DMA_MINALIGN;
 #endif
 	return 1;
 }
+#endif
 
 static inline void *dmam_alloc_coherent(struct device *dev, size_t size,
 		dma_addr_t *dma_handle, gfp_t gfp)

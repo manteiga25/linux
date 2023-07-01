@@ -764,11 +764,8 @@ static int davinci_i2c_probe(struct platform_device *pdev)
 	int r, irq;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
-		if (!irq)
-			irq = -ENXIO;
+	if (irq < 0)
 		return dev_err_probe(&pdev->dev, irq, "can't get irq resource\n");
-	}
 
 	dev = devm_kzalloc(&pdev->dev, sizeof(struct davinci_i2c_dev),
 			GFP_KERNEL);
@@ -823,7 +820,7 @@ static int davinci_i2c_probe(struct platform_device *pdev)
 	r = pm_runtime_resume_and_get(dev->dev);
 	if (r < 0) {
 		dev_err(dev->dev, "failed to runtime_get device: %d\n", r);
-		return r;
+		goto err_pm;
 	}
 
 	i2c_davinci_init(dev);
@@ -882,6 +879,7 @@ static int davinci_i2c_probe(struct platform_device *pdev)
 err_unuse_clocks:
 	pm_runtime_dont_use_autosuspend(dev->dev);
 	pm_runtime_put_sync(dev->dev);
+err_pm:
 	pm_runtime_disable(dev->dev);
 
 	return r;

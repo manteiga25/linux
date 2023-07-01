@@ -47,6 +47,10 @@
 #include <linux/kgdb.h>
 #include <linux/kprobes.h>
 
+#if defined(CONFIG_LIGHTWEIGHT_SPINLOCK_CHECK)
+#include <asm/spinlock.h>
+#endif
+
 #include "../math-emu/math-emu.h"	/* for handle_fpe() */
 
 static void parisc_show_stack(struct task_struct *task,
@@ -239,13 +243,6 @@ void die_if_kernel(char *str, struct pt_regs *regs, long err)
 	/* unlock the pdc lock if necessary */
 	pdc_emergency_unlock();
 
-	/* maybe the kernel hasn't booted very far yet and hasn't been able 
-	 * to initialize the serial or STI console. In that case we should 
-	 * re-enable the pdc console, so that the user will be able to 
-	 * identify the problem. */
-	if (!console_drivers)
-		pdc_console_restart();
-	
 	if (err)
 		printk(KERN_CRIT "%s (pid %d): %s (code %ld)\n",
 			current->comm, task_pid_nr(current), str, err);
@@ -298,21 +295,27 @@ static void handle_break(struct pt_regs *regs)
 	}
 
 #ifdef CONFIG_KPROBES
-	if (unlikely(iir == PARISC_KPROBES_BREAK_INSN)) {
+	if (unlikely(iir == PARISC_KPROBES_BREAK_INSN && !user_mode(regs))) {
 		parisc_kprobe_break_handler(regs);
 		return;
 	}
-	if (unlikely(iir == PARISC_KPROBES_BREAK_INSN2)) {
+	if (unlikely(iir == PARISC_KPROBES_BREAK_INSN2 && !user_mode(regs))) {
 		parisc_kprobe_ss_handler(regs);
 		return;
 	}
 #endif
 
 #ifdef CONFIG_KGDB
-	if (unlikely(iir == PARISC_KGDB_COMPILED_BREAK_INSN ||
-		iir == PARISC_KGDB_BREAK_INSN)) {
+	if (unlikely((iir == PARISC_KGDB_COMPILED_BREAK_INSN ||
+		iir == PARISC_KGDB_BREAK_INSN)) && !user_mode(regs)) {
 		kgdb_handle_exception(9, SIGTRAP, 0, regs);
 		return;
+	}
+#endif
+
+#ifdef CONFIG_LIGHTWEIGHT_SPINLOCK_CHECK
+        if ((iir == SPINLOCK_BREAK_INSN) && !user_mode(regs)) {
+		die_if_kernel("Spinlock was trashed", regs, 1);
 	}
 #endif
 
@@ -429,10 +432,6 @@ void parisc_terminate(char *msg, struct pt_regs *regs, int code, unsigned long o
 	/* unlock the pdc lock if necessary */
 	pdc_emergency_unlock();
 
-	/* restart pdc console if necessary */
-	if (!console_drivers)
-		pdc_console_restart();
-
 	/* Not all paths will gutter the processor... */
 	switch(code){
 
@@ -482,9 +481,7 @@ void notrace handle_interruption(int code, struct pt_regs *regs)
 	unsigned long fault_space = 0;
 	int si_code;
 
-	if (code == 1)
-	    pdc_console_restart();  /* switch back to pdc if HPMC */
-	else if (!irqs_disabled_flags(regs->gr[0]))
+	if (!irqs_disabled_flags(regs->gr[0]))
 	    local_irq_enable();
 
 	/* Security check:
